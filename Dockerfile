@@ -3,14 +3,19 @@ FROM mcr.microsoft.com/playwright:v1.40.1-jammy
 WORKDIR /app
 
 COPY package*.json ./
+COPY tsconfig.json ./
 
-# Install ALL dependencies (playwright needs to be installed)
+# Install ALL dependencies (including devDependencies for build)
 RUN npm ci
 
 # Playwright browsers are already in the base image, but ensure chromium is available
 RUN npx playwright install chromium --with-deps
 
-COPY dist ./dist
+# Copy source code
+COPY src ./src
+
+# Build TypeScript
+RUN npm run build
 
 RUN mkdir -p /app/data
 
