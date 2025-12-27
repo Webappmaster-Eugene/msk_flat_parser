@@ -33,7 +33,13 @@ export async function initBrowser(): Promise<BrowserContext> {
     };
   }
 
-  browser = await chromium.launch(launchOptions);
+  try {
+    browser = await chromium.launch(launchOptions);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error({ error: errorMessage, stack: error instanceof Error ? error.stack : undefined }, 'Failed to launch browser');
+    throw new Error(`Browser launch failed: ${errorMessage}`);
+  }
 
   const contextOptions: Parameters<typeof browser.newContext>[0] = {
     userAgent: getRandomUserAgent(),
