@@ -1,0 +1,89 @@
+import { chromium, Browser, BrowserContext, Page } from 'playwright';
+import { config } from '../config';
+import { getRandomUserAgent, setupAntiDetection } from './anti-detect';
+import { logger } from '../logger';
+import fs from 'fs';
+import path from 'path';
+
+let browser: Browser | null = null;
+let context: BrowserContext | null = null;
+
+export async function initBrowser(): Promise<BrowserContext> {
+  if (context) {
+    return context;
+  }
+
+  logger.info('Initializing browser...');
+
+  const launchOptions: Parameters<typeof chromium.launch>[0] = {
+    headless: config.browser.headless,
+    slowMo: config.browser.slowMo,
+    args: [
+      '--disable-blink-features=AutomationControlled',
+      '--disable-dev-shm-usage',
+      '--no-sandbox',
+    ],
+  };
+
+  if (config.proxy.enabled && config.proxy.url) {
+    launchOptions.proxy = {
+      server: config.proxy.url,
+      username: config.proxy.username || undefined,
+      password: config.proxy.password || undefined,
+    };
+  }
+
+  browser = await chromium.launch(launchOptions);
+
+  const contextOptions: Parameters<typeof browser.newContext>[0] = {
+    userAgent: getRandomUserAgent(),
+    viewport: { width: 1920, height: 1080 },
+    locale: 'ru-RU',
+    timezoneId: 'Europe/Moscow',
+  };
+
+  if (fs.existsSync(config.paths.browserState)) {
+    try {
+      contextOptions.storageState = config.paths.browserState;
+      logger.info('Loaded browser state from file');
+    } catch (e) {
+      logger.warn('Failed to load browser state, starting fresh');
+    }
+  }
+
+  context = await browser.newContext(contextOptions);
+  
+  logger.info('Browser initialized');
+  return context;
+}
+
+export async function getPage(): Promise<Page> {
+  const ctx = await initBrowser();
+  const page = await ctx.newPage();
+  await setupAntiDetection(page);
+  return page;
+}
+
+export async function saveBrowserState(): Promise<void> {
+  if (context) {
+    const dir = path.dirname(config.paths.browserState);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    await context.storageState({ path: config.paths.browserState });
+    logger.debug('Browser state saved');
+  }
+}
+
+export async function closeBrowser(): Promise<void> {
+  if (context) {
+    await saveBrowserState();
+    await context.close();
+    context = null;
+  }
+  if (browser) {
+    await browser.close();
+    browser = null;
+  }
+  logger.info('Browser closed');
+}
