@@ -5,6 +5,7 @@ import { getEnabledProfiles } from '../config/search-profiles';
 import { getPage, randomDelay } from '../scraper';
 import { checkForAvailableApartments } from '../scraper/parser';
 import { sendAvailableAlert, sendErrorNotification, sendHeartbeat } from '../notifier';
+import { cleanupOldFiles } from '../utils/cleanup';
 
 let scheduledTask: cron.ScheduledTask | null = null;
 let heartbeatTask: cron.ScheduledTask | null = null;
@@ -84,6 +85,9 @@ export async function runScrapeJob(): Promise<void> {
     }
 
     logger.info('Scrape job completed');
+
+    // Cleanup old screenshots and videos
+    cleanupOldFiles();
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);

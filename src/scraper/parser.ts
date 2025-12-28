@@ -113,27 +113,97 @@ export async function checkForAvailableApartments(page: Page, profile: SearchPro
     logger.info({ profileId: profile.id }, 'Looking for "Все" pagination button...');
     
     try {
-      await page.evaluate(() => window.scrollTo(0, 0));
-      await randomDelay(500, 1000);
+      // Scroll down to make pagination visible
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await randomDelay(1000, 1500);
       
-      const clicked = await page.evaluate(() => {
-        const allDiv = document.querySelector('[data-id="all"]') as HTMLElement;
-        if (allDiv) {
-          allDiv.click();
-          return true;
-        }
-        const allElements = Array.from(document.querySelectorAll('*')).filter(
-          el => el.textContent?.trim() === 'Все' && el.children.length === 0
+      // Debug: find all elements with "Все" text
+      const debugInfo = await page.evaluate(() => {
+        const results: string[] = [];
+        const allEls = document.querySelectorAll('*');
+        allEls.forEach((el, i) => {
+          if (el.textContent?.trim() === 'Все' && el.children.length === 0) {
+            const rect = (el as HTMLElement).getBoundingClientRect();
+            results.push(`[${i}] tag=${el.tagName} class="${el.className}" visible=${rect.width > 0 && rect.height > 0} rect=${JSON.stringify(rect)}`);
+          }
+        });
+        return results;
+      });
+      logger.info({ profileId: profile.id, elements: debugInfo }, 'DEBUG: Found elements with text "Все"');
+      
+      // Try multiple strategies to find and click "Все"
+      let clicked: string | false = false;
+      
+      // Strategy: Find "Все" element, scroll to it, then click
+      const clickResult = await page.evaluate(() => {
+        // Find all "Все" elements (excluding already active ones)
+        const allEls = Array.from(document.querySelectorAll('*')).filter(
+          el => el.textContent?.trim() === 'Все' && 
+                el.children.length === 0 &&
+                !el.classList.contains('active')
         );
-        if (allElements.length > 0) {
-          (allElements[allElements.length - 1] as HTMLElement).click();
-          return true;
+        
+        // Find one with positive dimensions
+        for (const el of allEls) {
+          const rect = (el as HTMLElement).getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            // Scroll element into view first
+            (el as HTMLElement).scrollIntoView({ behavior: 'instant', block: 'center' });
+            
+            // Wait a bit for scroll to complete
+            return { found: true, tag: el.tagName, class: el.className, needsClick: true };
+          }
         }
-        return false;
+        
+        // Try data-id="all" 
+        const dataIdEl = document.querySelector('[data-id="all"]') as HTMLElement;
+        if (dataIdEl && !dataIdEl.classList.contains('active')) {
+          dataIdEl.scrollIntoView({ behavior: 'instant', block: 'center' });
+          return { found: true, tag: 'data-id', class: dataIdEl.className, needsClick: true };
+        }
+        
+        return { found: false };
       });
       
+      // If element found, wait for scroll and click
+      if (clickResult.found && clickResult.needsClick) {
+        await randomDelay(500, 800);
+        
+        // Now click after scroll
+        const finalClick = await page.evaluate(() => {
+          const allEls = Array.from(document.querySelectorAll('*')).filter(
+            el => el.textContent?.trim() === 'Все' && 
+                  el.children.length === 0 &&
+                  !el.classList.contains('active')
+          );
+          
+          for (const el of allEls) {
+            const rect = (el as HTMLElement).getBoundingClientRect();
+            // Now check if element is in viewport (y > 0 and y < window height)
+            if (rect.width > 0 && rect.height > 0 && rect.y > 0 && rect.y < window.innerHeight) {
+              (el as HTMLElement).click();
+              return { success: true, y: rect.y };
+            }
+          }
+          
+          // Fallback to data-id
+          const dataIdEl = document.querySelector('[data-id="all"]') as HTMLElement;
+          if (dataIdEl) {
+            dataIdEl.click();
+            return { success: true, y: 'data-id' };
+          }
+          
+          return { success: false };
+        });
+        
+        if (finalClick.success) {
+          clicked = `${clickResult.tag}-scrolled-y${finalClick.y}`;
+          logger.info({ profileId: profile.id, clickResult, finalClick }, 'Clicked element after scroll');
+        }
+      }
+      
       if (clicked) {
-        logger.info({ profileId: profile.id }, 'Clicked "Все" via JavaScript');
+        logger.info({ profileId: profile.id, strategy: clicked }, 'Clicked "Все" via JavaScript');
         await randomDelay(3000, 5000);
         try {
           await page.waitForLoadState('networkidle', { timeout: 20000 });
