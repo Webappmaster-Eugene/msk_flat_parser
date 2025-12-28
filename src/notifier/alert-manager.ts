@@ -56,9 +56,85 @@ export function initAlertManager(telegramBot: Bot): void {
       `🏠 *Москварталы Монитор*\n\n` +
       `Этот бот отслеживает появление свободных квартир.\n\n` +
       `🆔 Ваш Chat ID: \`${chatId}\`\n\n` +
-      `Отправьте этот ID администратору для получения уведомлений.`,
+      `Команды:\n` +
+      `/check - проверить квартиры сейчас\n` +
+      `/chatid - показать ваш Chat ID\n\n` +
+      `Отправьте Chat ID администратору для получения уведомлений.`,
       { parse_mode: 'Markdown' }
     );
+  });
+  
+  // Command /check - immediate check with report
+  bot.command('check', async (ctx) => {
+    const chatId = ctx.chat.id.toString();
+    
+    // Only allow for monitored users
+    if (!config.telegram.chatIds.includes(chatId)) {
+      await ctx.reply('⛔ У вас нет доступа к этой команде.');
+      return;
+    }
+    
+    logger.info({ chatId }, 'Manual check requested');
+    await ctx.reply('🔍 *Запускаю проверку квартир...*', { parse_mode: 'Markdown' });
+    
+    const profiles = getEnabledProfiles();
+    if (profiles.length === 0) {
+      await ctx.reply('⚠️ Нет активных профилей для проверки');
+      return;
+    }
+    
+    for (const profile of profiles) {
+      try {
+        const startTime = Date.now();
+        await ctx.reply(`📋 Проверяю: ${profile.name}...`);
+        
+        const page = await getPage();
+        try {
+          const result = await checkForAvailableApartments(page, profile);
+          const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+          
+          if (result.error) {
+            await ctx.reply(
+              `❌ *Ошибка проверки*\n\n` +
+              `Профиль: ${profile.name}\n` +
+              `Ошибка: ${result.error}`,
+              { parse_mode: 'Markdown' }
+            );
+            continue;
+          }
+          
+          const statusEmoji = result.availableButtons.length > 0 ? '🎉' : '📊';
+          const availableText = result.availableButtons.length > 0 
+            ? `✅ *ЕСТЬ СВОБОДНЫЕ: ${result.availableButtons.length}*` 
+            : '🔒 Все забронированы';
+          
+          await ctx.reply(
+            `${statusEmoji} *Результат проверки*\n\n` +
+            `📋 Профиль: ${profile.name}\n` +
+            `⏱ Время: ${duration}с\n\n` +
+            `📊 Всего квартир: ${result.totalButtons}\n` +
+            `🔒 Забронировано: ${result.bookedButtons}\n` +
+            `${availableText}\n\n` +
+            `🕐 ${new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })}`,
+            { parse_mode: 'Markdown' }
+          );
+          
+          // If available apartments found, also send the full alert
+          if (result.availableButtons.length > 0) {
+            await sendAlertWithReminders(bot!, profile.name, result);
+          }
+          
+        } finally {
+          await page.close();
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        await ctx.reply(`❌ Ошибка: ${errorMsg}`);
+        logger.error({ error: errorMsg, profileId: profile.id }, 'Manual check failed');
+      }
+    }
+    
+    await ctx.reply('✅ *Проверка завершена*', { parse_mode: 'Markdown' });
   });
   
   bot.on('message', (ctx) => {
