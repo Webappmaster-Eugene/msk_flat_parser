@@ -29,6 +29,36 @@ export function initAlertManager(telegramBot: Bot): void {
     return;
   }
   
+  // Command to get chat ID - works for ANY user
+  bot.command('chatid', async (ctx) => {
+    const chatId = ctx.chat.id.toString();
+    const username = ctx.from?.username || 'unknown';
+    const firstName = ctx.from?.first_name || '';
+    
+    logger.info({ chatId, username }, 'User requested their chat ID');
+    
+    await ctx.reply(
+      `🆔 *Ваш Chat ID:* \`${chatId}\`\n\n` +
+      `👤 Имя: ${firstName}\n` +
+      `📝 Username: @${username}\n\n` +
+      `_Отправьте этот ID администратору для добавления в мониторинг_`,
+      { parse_mode: 'Markdown' }
+    );
+  });
+  
+  // Command /start - welcome message
+  bot.command('start', async (ctx) => {
+    const chatId = ctx.chat.id.toString();
+    
+    await ctx.reply(
+      `🏠 *Москварталы Монитор*\n\n` +
+      `Этот бот отслеживает появление свободных квартир.\n\n` +
+      `🆔 Ваш Chat ID: \`${chatId}\`\n\n` +
+      `Отправьте этот ID администратору для получения уведомлений.`,
+      { parse_mode: 'Markdown' }
+    );
+  });
+  
   bot.on('message', (ctx) => {
     const chatId = ctx.chat.id.toString();
     
