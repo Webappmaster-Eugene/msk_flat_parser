@@ -46,6 +46,10 @@ export async function initBrowser(): Promise<BrowserContext> {
     viewport: { width: 1920, height: 1080 },
     locale: 'ru-RU',
     timezoneId: 'Europe/Moscow',
+    recordVideo: config.browser.recordVideo ? {
+      dir: path.join(config.paths.data, 'videos'),
+      size: { width: 1280, height: 720 },
+    } : undefined,
   };
 
   if (fs.existsSync(config.paths.browserState)) {

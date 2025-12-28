@@ -43,6 +43,7 @@ export const config = {
   browser: {
     headless: process.env.HEADLESS !== 'false',
     slowMo: parseInt(process.env.SLOW_MO || '0', 10),
+    recordVideo: process.env.RECORD_VIDEO === 'true',
   },
   logging: {
     level: process.env.LOG_LEVEL || 'info',
