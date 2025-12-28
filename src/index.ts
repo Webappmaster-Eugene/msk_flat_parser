@@ -2,7 +2,7 @@ import { config, validateConfig } from './config';
 import { logger } from './logger';
 import { initDatabase, closeDatabase } from './database';
 import { initBrowser, closeBrowser } from './scraper';
-import { testConnection, sendStartupMessage } from './notifier';
+import { testConnection, sendStartupMessage, startListeningForResponses } from './notifier';
 import { startScheduler, stopScheduler, runScrapeJob } from './scheduler';
 
 async function shutdown(): Promise<void> {
@@ -35,6 +35,9 @@ async function main(): Promise<void> {
   await initBrowser();
 
   await sendStartupMessage();
+
+  // Start listening for user responses (for alert acknowledgment)
+  startListeningForResponses();
 
   logger.info('Running initial scrape...');
   await runScrapeJob();

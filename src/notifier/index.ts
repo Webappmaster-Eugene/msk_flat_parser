@@ -3,6 +3,7 @@ import { config } from '../config';
 import { logger } from '../logger';
 import { SimpleResult } from '../scraper/parser';
 import { formatStartupMessage, formatErrorMessage, formatAvailableAlert, formatHeartbeatMessage } from './templates';
+import { sendAlertWithReminders, startBotPolling } from './alert-manager';
 
 let bot: Bot | null = null;
 
@@ -28,18 +29,8 @@ export async function sendAvailableAlert(profileName: string, result: SimpleResu
     return;
   }
 
-  const message = formatAvailableAlert(profileName, result);
-  
-  for (const chatId of config.telegram.chatIds) {
-    try {
-      await telegramBot.api.sendMessage(chatId, message, {
-        parse_mode: 'Markdown',
-      });
-      logger.info({ chatId, availableCount: result.availableButtons.length }, 'Available alert sent!');
-    } catch (error) {
-      logger.error({ error, chatId }, 'Failed to send available alert');
-    }
-  }
+  // Use alert manager with reminders
+  await sendAlertWithReminders(telegramBot, profileName, result);
 }
 
 export async function sendStartupMessage(): Promise<void> {
@@ -109,4 +100,9 @@ export async function sendHeartbeat(stats: { totalChecks: number; lastCheckTime:
       logger.error({ error, chatId }, 'Failed to send heartbeat message');
     }
   }
+}
+
+export function startListeningForResponses(): void {
+  const telegramBot = initNotifier();
+  startBotPolling(telegramBot);
 }

@@ -1,0 +1,198 @@
+import { Bot } from 'grammy';
+import { config } from '../config';
+import { logger } from '../logger';
+import { SimpleResult } from '../scraper/parser';
+import { formatAvailableAlert } from './templates';
+
+interface PendingAlert {
+  id: string;
+  profileName: string;
+  result: SimpleResult;
+  sentAt: Date;
+  remindersSent: number;
+  acknowledged: boolean;
+}
+
+let bot: Bot | null = null;
+let pendingAlert: PendingAlert | null = null;
+let reminderInterval: NodeJS.Timeout | null = null;
+let isListening = false;
+
+const WAIT_FOR_RESPONSE_MS = 5 * 60 * 1000; // 5 minutes
+const REMINDER_INTERVAL_MS = 1 * 60 * 1000; // 1 minute
+const MAX_REMINDERS = 5;
+
+export function initAlertManager(telegramBot: Bot): void {
+  bot = telegramBot;
+  
+  if (isListening) {
+    return;
+  }
+  
+  bot.on('message', (ctx) => {
+    const chatId = ctx.chat.id.toString();
+    
+    if (config.telegram.chatIds.includes(chatId)) {
+      logger.info({ chatId, text: ctx.message.text }, 'Received message from monitored chat');
+      
+      if (pendingAlert && !pendingAlert.acknowledged) {
+        acknowledgePendingAlert(chatId);
+      }
+    }
+  });
+  
+  isListening = true;
+  logger.info('Alert manager initialized - listening for responses');
+}
+
+export function startBotPolling(telegramBot: Bot): void {
+  bot = telegramBot;
+  initAlertManager(telegramBot);
+  
+  bot.start({
+    onStart: () => {
+      logger.info('Telegram bot started polling for messages');
+    },
+  });
+}
+
+function acknowledgePendingAlert(chatId: string): void {
+  if (!pendingAlert) return;
+  
+  pendingAlert.acknowledged = true;
+  
+  if (reminderInterval) {
+    clearInterval(reminderInterval);
+    reminderInterval = null;
+  }
+  
+  logger.info({ 
+    chatId, 
+    alertId: pendingAlert.id,
+    remindersSent: pendingAlert.remindersSent 
+  }, 'Alert acknowledged by user');
+  
+  // Send confirmation
+  if (bot) {
+    bot.api.sendMessage(chatId, '✅ Отлично! Вы подтвердили получение уведомления о свободной квартире. Удачи с бронированием! 🏠')
+      .catch(err => logger.error({ err }, 'Failed to send acknowledgment'));
+  }
+  
+  pendingAlert = null;
+}
+
+export async function sendAlertWithReminders(
+  telegramBot: Bot,
+  profileName: string,
+  result: SimpleResult
+): Promise<void> {
+  bot = telegramBot;
+  initAlertManager(telegramBot);
+  
+  // If there's already a pending alert, cancel its reminders
+  if (pendingAlert && reminderInterval) {
+    clearInterval(reminderInterval);
+    reminderInterval = null;
+  }
+  
+  const alertId = `alert-${Date.now()}`;
+  pendingAlert = {
+    id: alertId,
+    profileName,
+    result,
+    sentAt: new Date(),
+    remindersSent: 0,
+    acknowledged: false,
+  };
+  
+  const message = formatAvailableAlert(profileName, result);
+  const urgentMessage = `${message}\n\n⏰ *Ответьте на это сообщение чтобы подтвердить получение!*`;
+  
+  // Send initial alert to all chats
+  for (const chatId of config.telegram.chatIds) {
+    try {
+      await bot.api.sendMessage(chatId, urgentMessage, {
+        parse_mode: 'Markdown',
+      });
+      logger.info({ chatId, alertId }, 'Initial alert sent');
+    } catch (error) {
+      logger.error({ error, chatId }, 'Failed to send initial alert');
+    }
+  }
+  
+  // Wait 5 minutes, then start sending reminders
+  setTimeout(() => {
+    if (pendingAlert?.id === alertId && !pendingAlert.acknowledged) {
+      startReminders(alertId, profileName, result);
+    }
+  }, WAIT_FOR_RESPONSE_MS);
+}
+
+function startReminders(alertId: string, profileName: string, result: SimpleResult): void {
+  if (!bot || !pendingAlert || pendingAlert.id !== alertId) return;
+  
+  logger.info({ alertId }, 'No response received, starting reminders');
+  
+  // Send first reminder immediately
+  sendReminder(alertId, profileName, result);
+  
+  // Then send remaining reminders every minute
+  reminderInterval = setInterval(() => {
+    if (!pendingAlert || pendingAlert.id !== alertId || pendingAlert.acknowledged) {
+      if (reminderInterval) {
+        clearInterval(reminderInterval);
+        reminderInterval = null;
+      }
+      return;
+    }
+    
+    if (pendingAlert.remindersSent >= MAX_REMINDERS) {
+      logger.warn({ alertId, remindersSent: pendingAlert.remindersSent }, 'Max reminders sent, stopping');
+      clearInterval(reminderInterval!);
+      reminderInterval = null;
+      pendingAlert = null;
+      return;
+    }
+    
+    sendReminder(alertId, profileName, result);
+  }, REMINDER_INTERVAL_MS);
+}
+
+async function sendReminder(alertId: string, profileName: string, result: SimpleResult): Promise<void> {
+  if (!bot || !pendingAlert || pendingAlert.id !== alertId || pendingAlert.acknowledged) return;
+  
+  pendingAlert.remindersSent++;
+  const reminderNum = pendingAlert.remindersSent;
+  
+  const reminderMessage = `🚨🚨🚨 *НАПОМИНАНИЕ ${reminderNum}/${MAX_REMINDERS}* 🚨🚨🚨
+
+🏠 *СВОБОДНАЯ КВАРТИРА ЖДЁТ ВАС!*
+
+Профиль: ${profileName}
+Доступно: ${result.availableButtons.length} квартир(а)
+
+⚠️ *Квартиру могут забронировать в любой момент!*
+
+👉 [ОТКРЫТЬ САЙТ](https://москварталы.рф/kvartiry/?property=семейная&floor[]=4;17&area[]=28;34&price[]=8;12&price_m[]=330.5;380.5&district=2594)
+
+_Ответьте любым сообщением чтобы остановить напоминания_`;
+
+  for (const chatId of config.telegram.chatIds) {
+    try {
+      await bot.api.sendMessage(chatId, reminderMessage, {
+        parse_mode: 'Markdown',
+      });
+      logger.info({ chatId, alertId, reminderNum }, 'Reminder sent');
+    } catch (error) {
+      logger.error({ error, chatId, reminderNum }, 'Failed to send reminder');
+    }
+  }
+}
+
+export function hasPendingAlert(): boolean {
+  return pendingAlert !== null && !pendingAlert.acknowledged;
+}
+
+export function getPendingAlert(): PendingAlert | null {
+  return pendingAlert;
+}
