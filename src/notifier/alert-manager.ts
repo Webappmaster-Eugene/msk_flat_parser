@@ -1,8 +1,10 @@
 import { Bot } from 'grammy';
 import { config } from '../config';
 import { logger } from '../logger';
-import { SimpleResult } from '../scraper/parser';
+import { SimpleResult, checkForAvailableApartments } from '../scraper/parser';
 import { formatAvailableAlert } from './templates';
+import { getEnabledProfiles } from '../config/search-profiles';
+import { getPage } from '../scraper';
 
 interface PendingAlert {
   id: string;
