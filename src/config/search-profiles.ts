@@ -10,6 +10,16 @@ export const searchProfiles: SearchProfile[] = [
     notifyOnAvailable: true,
     notifyOnPriceChange: false,
   },
+  // Пример второго профиля (раскомментируйте и измените):
+  // {
+  //   id: 'family-mortgage-2room',
+  //   name: 'Семейная ипотека 2-комн (45-60м²)',
+  //   url: 'https://москварталы.рф/kvartiry/?property=семейная&area[]=45;60&price[]=10;15',
+  //   enabled: true,
+  //   notifyOnNew: true,
+  //   notifyOnAvailable: true,
+  //   notifyOnPriceChange: false,
+  // },
 ];
 
 export const testProfileWithAvailable: SearchProfile = {
