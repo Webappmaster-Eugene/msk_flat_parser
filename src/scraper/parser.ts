@@ -55,8 +55,12 @@ export async function checkForAvailableApartments(page: Page, profile: SearchPro
       logger.warn({ profileId: profile.id }, 'Network idle timeout, continuing anyway...');
     }
 
-    await page.screenshot({ path: 'data/debug-1-loaded.png' });
-    logger.info({ profileId: profile.id }, 'Screenshot saved: debug-1-loaded.png');
+    try {
+      await page.screenshot({ path: 'data/debug-1-loaded.png', timeout: 10000 });
+      logger.info({ profileId: profile.id }, 'Screenshot saved: debug-1-loaded.png');
+    } catch {
+      logger.warn({ profileId: profile.id }, 'Screenshot 1 failed, continuing...');
+    }
     
     logger.info({ profileId: profile.id }, 'Looking for view switcher (Плитка)...');
     
@@ -89,8 +93,12 @@ export async function checkForAvailableApartments(page: Page, profile: SearchPro
       logger.warn({ profileId: profile.id, error: String(e) }, 'No "Показать квартир" button found');
     }
 
-    await page.screenshot({ path: 'data/debug-2-after-show.png' });
-    logger.info({ profileId: profile.id }, 'Screenshot saved: debug-2-after-show.png');
+    try {
+      await page.screenshot({ path: 'data/debug-2-after-show.png', timeout: 10000 });
+      logger.info({ profileId: profile.id }, 'Screenshot saved: debug-2-after-show.png');
+    } catch {
+      logger.warn({ profileId: profile.id }, 'Screenshot 2 failed, continuing...');
+    }
     
     try {
       const closeBtn = page.locator('[class*="close"], [class*="modal"] button, .popup-close').first();
@@ -145,8 +153,12 @@ export async function checkForAvailableApartments(page: Page, profile: SearchPro
     }
     await randomDelay(2000, 3000);
 
-    await page.screenshot({ path: 'data/debug-3-final.png', fullPage: true });
-    logger.info({ profileId: profile.id }, 'Screenshot saved: debug-3-final.png');
+    try {
+      await page.screenshot({ path: 'data/debug-3-final.png', fullPage: true, timeout: 15000 });
+      logger.info({ profileId: profile.id }, 'Screenshot saved: debug-3-final.png');
+    } catch {
+      logger.warn({ profileId: profile.id }, 'Screenshot 3 failed, continuing...');
+    }
 
     logger.info({ profileId: profile.id }, 'Searching for apartment booking buttons...');
 
