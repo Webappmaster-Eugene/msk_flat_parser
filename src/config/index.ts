@@ -3,14 +3,31 @@ import path from 'path';
 
 dotenv.config();
 
+// Supports both formats: "id1,id2,id3" or ["id1","id2","id3"]
+function parseChatIds(value: string): string[] {
+  if (!value) return [];
+  
+  // Try JSON array format first
+  if (value.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.map(id => String(id).trim()).filter(id => id.length > 0);
+      }
+    } catch {
+      // Not valid JSON, fall through to comma-separated
+    }
+  }
+  
+  // Comma-separated format
+  return value.split(',').map(id => id.trim()).filter(id => id.length > 0);
+}
+
 export const config = {
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN || '',
     chatId: process.env.TELEGRAM_CHAT_ID || '',
-    chatIds: (process.env.TELEGRAM_CHAT_IDS || process.env.TELEGRAM_CHAT_ID || '')
-      .split(',')
-      .map(id => id.trim())
-      .filter(id => id.length > 0),
+    chatIds: parseChatIds(process.env.TELEGRAM_CHAT_IDS || process.env.TELEGRAM_CHAT_ID || ''),
   },
   scheduler: {
     checkIntervalMinutes: parseInt(process.env.CHECK_INTERVAL_MINUTES || '2', 10),
