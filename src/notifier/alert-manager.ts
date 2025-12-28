@@ -1,7 +1,7 @@
 import { Bot } from 'grammy';
 import { config } from '../config';
 import { logger } from '../logger';
-import { SimpleResult, checkForAvailableApartments } from '../scraper/parser';
+import { SimpleResult, checkForAvailableApartments } from '../scraper';
 import { formatAvailableAlert } from './templates';
 import { getEnabledProfiles } from '../config/search-profiles';
 import { getPage } from '../scraper';
@@ -26,19 +26,19 @@ const MAX_REMINDERS = 5;
 
 export function initAlertManager(telegramBot: Bot): void {
   bot = telegramBot;
-  
+
   if (isListening) {
     return;
   }
-  
+
   // Command to get chat ID - works for ANY user
   bot.command('chatid', async (ctx) => {
     const chatId = ctx.chat.id.toString();
     const username = ctx.from?.username || 'unknown';
     const firstName = ctx.from?.first_name || '';
-    
+
     logger.info({ chatId, username }, 'User requested their chat ID');
-    
+
     await ctx.reply(
       `🆔 *Ваш Chat ID:* \`${chatId}\`\n\n` +
       `👤 Имя: ${firstName}\n` +
@@ -47,11 +47,11 @@ export function initAlertManager(telegramBot: Bot): void {
       { parse_mode: 'Markdown' }
     );
   });
-  
+
   // Command /start - welcome message
   bot.command('start', async (ctx) => {
     const chatId = ctx.chat.id.toString();
-    
+
     await ctx.reply(
       `🏠 *Москварталы Монитор*\n\n` +
       `Этот бот отслеживает появление свободных квартир.\n\n` +
@@ -63,36 +63,36 @@ export function initAlertManager(telegramBot: Bot): void {
       { parse_mode: 'Markdown' }
     );
   });
-  
+
   // Command /check - immediate check with report
   bot.command('check', async (ctx) => {
     const chatId = ctx.chat.id.toString();
-    
+
     // Only allow for monitored users
     if (!config.telegram.chatIds.includes(chatId)) {
       await ctx.reply('⛔ У вас нет доступа к этой команде.');
       return;
     }
-    
+
     logger.info({ chatId }, 'Manual check requested');
     await ctx.reply('🔍 *Запускаю проверку квартир...*', { parse_mode: 'Markdown' });
-    
+
     const profiles = getEnabledProfiles();
     if (profiles.length === 0) {
       await ctx.reply('⚠️ Нет активных профилей для проверки');
       return;
     }
-    
+
     for (const profile of profiles) {
       try {
         const startTime = Date.now();
         await ctx.reply(`📋 Проверяю: ${profile.name}...`);
-        
+
         const page = await getPage();
         try {
           const result = await checkForAvailableApartments(page, profile);
           const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-          
+
           if (result.error) {
             await ctx.reply(
               `❌ *Ошибка проверки*\n\n` +
@@ -102,12 +102,12 @@ export function initAlertManager(telegramBot: Bot): void {
             );
             continue;
           }
-          
+
           const statusEmoji = result.availableButtons.length > 0 ? '🎉' : '📊';
-          const availableText = result.availableButtons.length > 0 
-            ? `✅ *ЕСТЬ СВОБОДНЫЕ: ${result.availableButtons.length}*` 
+          const availableText = result.availableButtons.length > 0
+            ? `✅ *ЕСТЬ СВОБОДНЫЕ: ${result.availableButtons.length}*`
             : '🔒 Все забронированы';
-          
+
           await ctx.reply(
             `${statusEmoji} *Результат проверки*\n\n` +
             `📋 Профиль: ${profile.name}\n` +
@@ -118,12 +118,12 @@ export function initAlertManager(telegramBot: Bot): void {
             `🕐 ${new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })}`,
             { parse_mode: 'Markdown' }
           );
-          
+
           // If available apartments found, also send the full alert
           if (result.availableButtons.length > 0) {
             await sendAlertWithReminders(bot!, profile.name, result);
           }
-          
+
         } finally {
           await page.close();
         }
@@ -133,22 +133,22 @@ export function initAlertManager(telegramBot: Bot): void {
         logger.error({ error: errorMsg, profileId: profile.id }, 'Manual check failed');
       }
     }
-    
+
     await ctx.reply('✅ *Проверка завершена*', { parse_mode: 'Markdown' });
   });
-  
+
   bot.on('message', (ctx) => {
     const chatId = ctx.chat.id.toString();
-    
+
     if (config.telegram.chatIds.includes(chatId)) {
       logger.info({ chatId, text: ctx.message.text }, 'Received message from monitored chat');
-      
+
       if (pendingAlert && !pendingAlert.acknowledged) {
         acknowledgePendingAlert(chatId);
       }
     }
   });
-  
+
   isListening = true;
   logger.info('Alert manager initialized - listening for responses');
 }
@@ -156,7 +156,7 @@ export function initAlertManager(telegramBot: Bot): void {
 export function startBotPolling(telegramBot: Bot): void {
   bot = telegramBot;
   initAlertManager(telegramBot);
-  
+
   bot.start({
     onStart: () => {
       logger.info('Telegram bot started polling for messages');
@@ -166,26 +166,26 @@ export function startBotPolling(telegramBot: Bot): void {
 
 function acknowledgePendingAlert(chatId: string): void {
   if (!pendingAlert) return;
-  
+
   pendingAlert.acknowledged = true;
-  
+
   if (reminderInterval) {
     clearInterval(reminderInterval);
     reminderInterval = null;
   }
-  
-  logger.info({ 
-    chatId, 
+
+  logger.info({
+    chatId,
     alertId: pendingAlert.id,
-    remindersSent: pendingAlert.remindersSent 
+    remindersSent: pendingAlert.remindersSent
   }, 'Alert acknowledged by user');
-  
+
   // Send confirmation
   if (bot) {
     bot.api.sendMessage(chatId, '✅ Отлично! Вы подтвердили получение уведомления о свободной квартире. Удачи с бронированием! 🏠')
       .catch(err => logger.error({ err }, 'Failed to send acknowledgment'));
   }
-  
+
   pendingAlert = null;
 }
 
@@ -196,13 +196,13 @@ export async function sendAlertWithReminders(
 ): Promise<void> {
   bot = telegramBot;
   initAlertManager(telegramBot);
-  
+
   // If there's already a pending alert, cancel its reminders
   if (pendingAlert && reminderInterval) {
     clearInterval(reminderInterval);
     reminderInterval = null;
   }
-  
+
   const alertId = `alert-${Date.now()}`;
   pendingAlert = {
     id: alertId,
@@ -212,10 +212,10 @@ export async function sendAlertWithReminders(
     remindersSent: 0,
     acknowledged: false,
   };
-  
+
   const message = formatAvailableAlert(profileName, result);
   const urgentMessage = `${message}\n\n⏰ *Ответьте на это сообщение чтобы подтвердить получение!*`;
-  
+
   // Send initial alert to all chats
   for (const chatId of config.telegram.chatIds) {
     try {
@@ -227,7 +227,7 @@ export async function sendAlertWithReminders(
       logger.error({ error, chatId }, 'Failed to send initial alert');
     }
   }
-  
+
   // Wait 5 minutes, then start sending reminders
   setTimeout(() => {
     if (pendingAlert?.id === alertId && !pendingAlert.acknowledged) {
@@ -238,12 +238,12 @@ export async function sendAlertWithReminders(
 
 function startReminders(alertId: string, profileName: string, result: SimpleResult): void {
   if (!bot || !pendingAlert || pendingAlert.id !== alertId) return;
-  
+
   logger.info({ alertId }, 'No response received, starting reminders');
-  
+
   // Send first reminder immediately
   sendReminder(alertId, profileName, result);
-  
+
   // Then send remaining reminders every minute
   reminderInterval = setInterval(() => {
     if (!pendingAlert || pendingAlert.id !== alertId || pendingAlert.acknowledged) {
@@ -253,7 +253,7 @@ function startReminders(alertId: string, profileName: string, result: SimpleResu
       }
       return;
     }
-    
+
     if (pendingAlert.remindersSent >= MAX_REMINDERS) {
       logger.warn({ alertId, remindersSent: pendingAlert.remindersSent }, 'Max reminders sent, stopping');
       clearInterval(reminderInterval!);
@@ -261,17 +261,17 @@ function startReminders(alertId: string, profileName: string, result: SimpleResu
       pendingAlert = null;
       return;
     }
-    
+
     sendReminder(alertId, profileName, result);
   }, REMINDER_INTERVAL_MS);
 }
 
 async function sendReminder(alertId: string, profileName: string, result: SimpleResult): Promise<void> {
   if (!bot || !pendingAlert || pendingAlert.id !== alertId || pendingAlert.acknowledged) return;
-  
+
   pendingAlert.remindersSent++;
   const reminderNum = pendingAlert.remindersSent;
-  
+
   const reminderMessage = `🚨🚨🚨 *НАПОМИНАНИЕ ${reminderNum}/${MAX_REMINDERS}* 🚨🚨🚨
 
 🏠 *СВОБОДНАЯ КВАРТИРА ЖДЁТ ВАС!*
