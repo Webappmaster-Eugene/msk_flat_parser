@@ -7,6 +7,10 @@ export const config = {
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN || '',
     chatId: process.env.TELEGRAM_CHAT_ID || '',
+    chatIds: (process.env.TELEGRAM_CHAT_IDS || process.env.TELEGRAM_CHAT_ID || '')
+      .split(',')
+      .map(id => id.trim())
+      .filter(id => id.length > 0),
   },
   scheduler: {
     checkIntervalMinutes: parseInt(process.env.CHECK_INTERVAL_MINUTES || '2', 10),
@@ -39,8 +43,8 @@ export function validateConfig(): void {
   if (!config.telegram.botToken) {
     errors.push('TELEGRAM_BOT_TOKEN is required');
   }
-  if (!config.telegram.chatId) {
-    errors.push('TELEGRAM_CHAT_ID is required');
+  if (config.telegram.chatIds.length === 0) {
+    errors.push('TELEGRAM_CHAT_ID or TELEGRAM_CHAT_IDS is required');
   }
 
   if (errors.length > 0) {

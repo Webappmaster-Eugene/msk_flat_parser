@@ -23,55 +23,60 @@ export function initNotifier(): Bot {
 export async function sendAvailableAlert(profileName: string, result: SimpleResult): Promise<void> {
   const telegramBot = initNotifier();
   
-  if (!config.telegram.chatId) {
-    logger.warn('TELEGRAM_CHAT_ID is not configured, skipping notification');
+  if (config.telegram.chatIds.length === 0) {
+    logger.warn('No TELEGRAM_CHAT_IDS configured, skipping notification');
     return;
   }
 
   const message = formatAvailableAlert(profileName, result);
   
-  try {
-    await telegramBot.api.sendMessage(config.telegram.chatId, message, {
-      parse_mode: 'Markdown',
-    });
-    logger.info({ availableCount: result.availableButtons.length }, 'Available alert sent!');
-  } catch (error) {
-    logger.error({ error }, 'Failed to send available alert');
-    throw error;
+  for (const chatId of config.telegram.chatIds) {
+    try {
+      await telegramBot.api.sendMessage(chatId, message, {
+        parse_mode: 'Markdown',
+      });
+      logger.info({ chatId, availableCount: result.availableButtons.length }, 'Available alert sent!');
+    } catch (error) {
+      logger.error({ error, chatId }, 'Failed to send available alert');
+    }
   }
 }
 
 export async function sendStartupMessage(): Promise<void> {
   const telegramBot = initNotifier();
   
-  if (!config.telegram.chatId) {
-    logger.warn('TELEGRAM_CHAT_ID is not configured, skipping startup message');
+  if (config.telegram.chatIds.length === 0) {
+    logger.warn('No TELEGRAM_CHAT_IDS configured, skipping startup message');
     return;
   }
 
-  try {
-    await telegramBot.api.sendMessage(config.telegram.chatId, formatStartupMessage(), {
-      parse_mode: 'Markdown',
-    });
-    logger.info('Startup message sent');
-  } catch (error) {
-    logger.error({ error }, 'Failed to send startup message');
+  for (const chatId of config.telegram.chatIds) {
+    try {
+      await telegramBot.api.sendMessage(chatId, formatStartupMessage(), {
+        parse_mode: 'Markdown',
+      });
+      logger.info({ chatId }, 'Startup message sent');
+    } catch (error) {
+      logger.error({ error, chatId }, 'Failed to send startup message');
+    }
   }
 }
 
 export async function sendErrorNotification(error: string): Promise<void> {
   const telegramBot = initNotifier();
   
-  if (!config.telegram.chatId) {
+  if (config.telegram.chatIds.length === 0) {
     return;
   }
 
-  try {
-    await telegramBot.api.sendMessage(config.telegram.chatId, formatErrorMessage(error), {
-      parse_mode: 'Markdown',
-    });
-  } catch (e) {
-    logger.error({ error: e }, 'Failed to send error notification');
+  for (const chatId of config.telegram.chatIds) {
+    try {
+      await telegramBot.api.sendMessage(chatId, formatErrorMessage(error), {
+        parse_mode: 'Markdown',
+      });
+    } catch (e) {
+      logger.error({ error: e, chatId }, 'Failed to send error notification');
+    }
   }
 }
 
@@ -90,16 +95,18 @@ export async function testConnection(): Promise<boolean> {
 export async function sendHeartbeat(stats: { totalChecks: number; lastCheckTime: Date | null; totalApartments: number; bookedCount: number }): Promise<void> {
   const telegramBot = initNotifier();
   
-  if (!config.telegram.chatId) {
+  if (config.telegram.chatIds.length === 0) {
     return;
   }
 
-  try {
-    await telegramBot.api.sendMessage(config.telegram.chatId, formatHeartbeatMessage(stats), {
-      parse_mode: 'Markdown',
-    });
-    logger.info('Heartbeat message sent');
-  } catch (error) {
-    logger.error({ error }, 'Failed to send heartbeat message');
+  for (const chatId of config.telegram.chatIds) {
+    try {
+      await telegramBot.api.sendMessage(chatId, formatHeartbeatMessage(stats), {
+        parse_mode: 'Markdown',
+      });
+      logger.info({ chatId }, 'Heartbeat message sent');
+    } catch (error) {
+      logger.error({ error, chatId }, 'Failed to send heartbeat message');
+    }
   }
 }
