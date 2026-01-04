@@ -218,10 +218,13 @@ export async function checkForAvailableApartments(page: Page, profile: SearchPro
     }
     
     for (let i = 0; i < 5; i++) {
+      if (page.isClosed()) break;
       await humanLikeScroll(page);
       await randomDelay(300, 600);
     }
-    await randomDelay(2000, 3000);
+    if (!page.isClosed()) {
+      await randomDelay(2000, 3000);
+    }
 
     try {
       await page.screenshot({ path: 'data/debug-3-final.png', fullPage: true, timeout: 15000 });

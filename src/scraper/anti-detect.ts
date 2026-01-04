@@ -37,9 +37,18 @@ export async function humanLikeClick(page: Page, selector: string): Promise<void
 }
 
 export async function humanLikeScroll(page: Page): Promise<void> {
-  const scrollAmount = Math.floor(Math.random() * 300) + 100;
-  await page.mouse.wheel(0, scrollAmount);
-  await randomDelay(200, 500);
+  try {
+    if (page.isClosed()) return;
+    const scrollAmount = Math.floor(Math.random() * 300) + 100;
+    await page.mouse.wheel(0, scrollAmount);
+    await randomDelay(200, 500);
+  } catch (error) {
+    // Ignore errors if page was closed during scroll
+    if (String(error).includes('closed') || String(error).includes('Target')) {
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function setupAntiDetection(page: Page): Promise<void> {
