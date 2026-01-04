@@ -61,9 +61,6 @@ export function validateConfig(): void {
   if (!config.telegram.botToken) {
     errors.push('TELEGRAM_BOT_TOKEN is required');
   }
-  if (config.telegram.chatIds.length === 0) {
-    errors.push('TELEGRAM_CHAT_ID or TELEGRAM_CHAT_IDS is required');
-  }
 
   if (errors.length > 0) {
     throw new Error(`Configuration errors:\n${errors.join('\n')}`);

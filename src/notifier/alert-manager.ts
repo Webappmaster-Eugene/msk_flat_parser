@@ -5,6 +5,7 @@ import { SimpleResult, checkForAvailableApartments } from '../scraper';
 import { formatAvailableAlert } from './templates';
 import { getEnabledProfiles } from '../config/search-profiles';
 import { getPage } from '../scraper';
+import { addSubscriber, removeSubscriber, isSubscriber, getAllSubscribers, getSubscriberCount } from '../database/subscribers';
 
 interface PendingAlert {
   id: string;
@@ -31,6 +32,16 @@ export function initAlertManager(telegramBot: Bot): void {
     return;
   }
 
+  // Global error handler for the bot
+  bot.catch((err) => {
+    const ctx = err.ctx;
+    logger.error({ 
+      error: err.error,
+      chatId: ctx?.chat?.id,
+      update: ctx?.update 
+    }, 'Bot error caught');
+  });
+
   // Command to get chat ID - works for ANY user
   bot.command('chatid', async (ctx) => {
     const chatId = ctx.chat.id.toString();
@@ -51,97 +62,172 @@ export function initAlertManager(telegramBot: Bot): void {
   // Command /start - welcome message
   bot.command('start', async (ctx) => {
     const chatId = ctx.chat.id.toString();
+    const subscribed = isSubscriber(chatId);
+    const statusText = subscribed ? '✅ Вы подписаны на уведомления' : '❌ Вы не подписаны';
 
     await ctx.reply(
       `🏠 *Москварталы Монитор*\n\n` +
       `Этот бот отслеживает появление свободных квартир.\n\n` +
-      `🆔 Ваш Chat ID: \`${chatId}\`\n\n` +
-      `Команды:\n` +
+      `${statusText}\n\n` +
+      `*Команды:*\n` +
+      `/subscribe - подписаться на уведомления\n` +
+      `/unsubscribe - отписаться от уведомлений\n` +
       `/check - проверить квартиры сейчас\n` +
-      `/chatid - показать ваш Chat ID\n\n` +
-      `Отправьте Chat ID администратору для получения уведомлений.`,
+      `/status - статус подписки\n` +
+      `/chatid - показать ваш Chat ID`,
       { parse_mode: 'Markdown' }
     );
   });
 
-  // Command /check - immediate check with report
+  // Command /subscribe - subscribe to notifications
+  bot.command('subscribe', async (ctx) => {
+    const chatId = ctx.chat.id.toString();
+    const username = ctx.from?.username;
+    const firstName = ctx.from?.first_name;
+
+    const added = addSubscriber(chatId, username, firstName);
+    
+    if (added) {
+      const count = getSubscriberCount();
+      await ctx.reply(
+        `✅ *Вы успешно подписались!*\n\n` +
+        `Теперь вы будете получать уведомления о свободных квартирах.\n\n` +
+        `👥 Всего подписчиков: ${count}`,
+        { parse_mode: 'Markdown' }
+      );
+      logger.info({ chatId, username }, 'User subscribed');
+    } else {
+      await ctx.reply('ℹ️ Вы уже подписаны на уведомления.');
+    }
+  });
+
+  // Command /unsubscribe - unsubscribe from notifications
+  bot.command('unsubscribe', async (ctx) => {
+    const chatId = ctx.chat.id.toString();
+
+    const removed = removeSubscriber(chatId);
+    
+    if (removed) {
+      await ctx.reply(
+        `👋 *Вы отписались от уведомлений*\n\n` +
+        `Вы больше не будете получать сообщения о свободных квартирах.\n\n` +
+        `Чтобы подписаться снова, используйте /subscribe`,
+        { parse_mode: 'Markdown' }
+      );
+      logger.info({ chatId }, 'User unsubscribed');
+    } else {
+      await ctx.reply('ℹ️ Вы не были подписаны.');
+    }
+  });
+
+  // Command /status - check subscription status
+  bot.command('status', async (ctx) => {
+    const chatId = ctx.chat.id.toString();
+    const subscribed = isSubscriber(chatId);
+    const totalSubscribers = getSubscriberCount();
+
+    const statusEmoji = subscribed ? '✅' : '❌';
+    const statusText = subscribed ? 'Подписан' : 'Не подписан';
+
+    await ctx.reply(
+      `📊 *Статус подписки*\n\n` +
+      `${statusEmoji} Ваш статус: *${statusText}*\n` +
+      `👥 Всего подписчиков: ${totalSubscribers}`,
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  // Command /check - immediate check with report (available to all subscribers)
   bot.command('check', async (ctx) => {
     const chatId = ctx.chat.id.toString();
 
-    // Only allow for monitored users
-    if (!config.telegram.chatIds.includes(chatId)) {
-      await ctx.reply('⛔ У вас нет доступа к этой команде.');
-      return;
-    }
+    try {
+      // Check if user is subscribed
+      if (!isSubscriber(chatId)) {
+        await ctx.reply(
+          '⚠️ Сначала подпишитесь на уведомления командой /subscribe',
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      }
 
-    logger.info({ chatId }, 'Manual check requested');
-    await ctx.reply('🔍 *Запускаю проверку квартир...*', { parse_mode: 'Markdown' });
+      logger.info({ chatId }, 'Manual check requested');
+      await ctx.reply('🔍 *Запускаю проверку квартир...*\n\n_Это может занять 1-2 минуты_', { parse_mode: 'Markdown' });
 
-    const profiles = getEnabledProfiles();
-    if (profiles.length === 0) {
-      await ctx.reply('⚠️ Нет активных профилей для проверки');
-      return;
-    }
+      const profiles = getEnabledProfiles();
+      if (profiles.length === 0) {
+        await ctx.reply('⚠️ Нет активных профилей для проверки');
+        return;
+      }
 
-    for (const profile of profiles) {
-      try {
-        const startTime = Date.now();
-        await ctx.reply(`📋 Проверяю: ${profile.name}...`);
-
-        const page = await getPage();
+      for (const profile of profiles) {
         try {
-          const result = await checkForAvailableApartments(page, profile);
-          const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+          const startTime = Date.now();
+          await ctx.reply(`📋 Проверяю: ${profile.name}...`);
 
-          if (result.error) {
+          const page = await getPage();
+          try {
+            const result = await checkForAvailableApartments(page, profile);
+            const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+
+            if (result.error) {
+              await ctx.reply(
+                `❌ *Ошибка проверки*\n\n` +
+                `Профиль: ${profile.name}\n` +
+                `Ошибка: ${result.error}`,
+                { parse_mode: 'Markdown' }
+              );
+              continue;
+            }
+
+            const statusEmoji = result.availableButtons.length > 0 ? '🎉' : '📊';
+            const availableText = result.availableButtons.length > 0
+              ? `✅ *ЕСТЬ СВОБОДНЫЕ: ${result.availableButtons.length}*`
+              : '🔒 Все забронированы';
+
             await ctx.reply(
-              `❌ *Ошибка проверки*\n\n` +
-              `Профиль: ${profile.name}\n` +
-              `Ошибка: ${result.error}`,
+              `${statusEmoji} *Результат проверки*\n\n` +
+              `📋 Профиль: ${profile.name}\n` +
+              `⏱ Время: ${duration}с\n\n` +
+              `📊 Всего квартир: ${result.totalButtons}\n` +
+              `🔒 Забронировано: ${result.bookedButtons}\n` +
+              `${availableText}\n\n` +
+              `🕐 ${new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })}`,
               { parse_mode: 'Markdown' }
             );
-            continue;
+
+            // If available apartments found, also send the full alert
+            if (result.availableButtons.length > 0) {
+              await sendAlertWithReminders(bot!, profile.name, result);
+            }
+
+          } finally {
+            await page.close();
           }
-
-          const statusEmoji = result.availableButtons.length > 0 ? '🎉' : '📊';
-          const availableText = result.availableButtons.length > 0
-            ? `✅ *ЕСТЬ СВОБОДНЫЕ: ${result.availableButtons.length}*`
-            : '🔒 Все забронированы';
-
-          await ctx.reply(
-            `${statusEmoji} *Результат проверки*\n\n` +
-            `📋 Профиль: ${profile.name}\n` +
-            `⏱ Время: ${duration}с\n\n` +
-            `📊 Всего квартир: ${result.totalButtons}\n` +
-            `🔒 Забронировано: ${result.bookedButtons}\n` +
-            `${availableText}\n\n` +
-            `🕐 ${new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })}`,
-            { parse_mode: 'Markdown' }
-          );
-
-          // If available apartments found, also send the full alert
-          if (result.availableButtons.length > 0) {
-            await sendAlertWithReminders(bot!, profile.name, result);
-          }
-
-        } finally {
-          await page.close();
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          await ctx.reply(`❌ Ошибка профиля: ${errorMsg}`);
+          logger.error({ error: errorMsg, profileId: profile.id }, 'Manual check failed for profile');
         }
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        await ctx.reply(`❌ Ошибка: ${errorMsg}`);
-        logger.error({ error: errorMsg, profileId: profile.id }, 'Manual check failed');
+      }
+
+      await ctx.reply('✅ *Проверка завершена*', { parse_mode: 'Markdown' });
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      logger.error({ error: errorMsg, chatId }, 'Manual check command failed');
+      try {
+        await ctx.reply(`❌ *Ошибка команды /check:*\n${errorMsg}`, { parse_mode: 'Markdown' });
+      } catch (replyError) {
+        logger.error({ replyError }, 'Failed to send error reply');
       }
     }
-
-    await ctx.reply('✅ *Проверка завершена*', { parse_mode: 'Markdown' });
   });
 
   bot.on('message', (ctx) => {
     const chatId = ctx.chat.id.toString();
 
-    if (config.telegram.chatIds.includes(chatId)) {
-      logger.info({ chatId, text: ctx.message.text }, 'Received message from monitored chat');
+    if (isSubscriber(chatId)) {
+      logger.info({ chatId, text: ctx.message.text }, 'Received message from subscriber');
 
       if (pendingAlert && !pendingAlert.acknowledged) {
         acknowledgePendingAlert(chatId);
@@ -216,8 +302,9 @@ export async function sendAlertWithReminders(
   const message = formatAvailableAlert(profileName, result);
   const urgentMessage = `${message}\n\n⏰ *Ответьте на это сообщение чтобы подтвердить получение!*`;
 
-  // Send initial alert to all chats
-  for (const chatId of config.telegram.chatIds) {
+  // Send initial alert to all subscribers
+  const subscribers = getAllSubscribers();
+  for (const chatId of subscribers) {
     try {
       await bot.api.sendMessage(chatId, urgentMessage, {
         parse_mode: 'Markdown',
@@ -285,7 +372,8 @@ async function sendReminder(alertId: string, profileName: string, result: Simple
 
 _Ответьте любым сообщением чтобы остановить напоминания_`;
 
-  for (const chatId of config.telegram.chatIds) {
+  const subscribers = getAllSubscribers();
+  for (const chatId of subscribers) {
     try {
       await bot.api.sendMessage(chatId, reminderMessage, {
         parse_mode: 'Markdown',

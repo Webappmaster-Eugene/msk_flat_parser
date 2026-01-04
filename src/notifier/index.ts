@@ -4,6 +4,7 @@ import { logger } from '../logger';
 import { SimpleResult } from '../scraper/parser';
 import { formatStartupMessage, formatErrorMessage, formatAvailableAlert, formatHeartbeatMessage } from './templates';
 import { sendAlertWithReminders, startBotPolling } from './alert-manager';
+import { getAllSubscribers } from '../database/subscribers';
 
 let bot: Bot | null = null;
 
@@ -24,8 +25,9 @@ export function initNotifier(): Bot {
 export async function sendAvailableAlert(profileName: string, result: SimpleResult): Promise<void> {
   const telegramBot = initNotifier();
   
-  if (config.telegram.chatIds.length === 0) {
-    logger.warn('No TELEGRAM_CHAT_IDS configured, skipping notification');
+  const subscribers = getAllSubscribers();
+  if (subscribers.length === 0) {
+    logger.warn('No subscribers, skipping notification');
     return;
   }
 
@@ -36,12 +38,13 @@ export async function sendAvailableAlert(profileName: string, result: SimpleResu
 export async function sendStartupMessage(): Promise<void> {
   const telegramBot = initNotifier();
   
-  if (config.telegram.chatIds.length === 0) {
-    logger.warn('No TELEGRAM_CHAT_IDS configured, skipping startup message');
+  const subscribers = getAllSubscribers();
+  if (subscribers.length === 0) {
+    logger.info('No subscribers yet, skipping startup message');
     return;
   }
 
-  for (const chatId of config.telegram.chatIds) {
+  for (const chatId of subscribers) {
     try {
       await telegramBot.api.sendMessage(chatId, formatStartupMessage(), {
         parse_mode: 'Markdown',
@@ -56,11 +59,12 @@ export async function sendStartupMessage(): Promise<void> {
 export async function sendErrorNotification(error: string): Promise<void> {
   const telegramBot = initNotifier();
   
-  if (config.telegram.chatIds.length === 0) {
+  const subscribers = getAllSubscribers();
+  if (subscribers.length === 0) {
     return;
   }
 
-  for (const chatId of config.telegram.chatIds) {
+  for (const chatId of subscribers) {
     try {
       await telegramBot.api.sendMessage(chatId, formatErrorMessage(error), {
         parse_mode: 'Markdown',
@@ -86,11 +90,12 @@ export async function testConnection(): Promise<boolean> {
 export async function sendHeartbeat(stats: { totalChecks: number; lastCheckTime: Date | null; totalApartments: number; bookedCount: number }): Promise<void> {
   const telegramBot = initNotifier();
   
-  if (config.telegram.chatIds.length === 0) {
+  const subscribers = getAllSubscribers();
+  if (subscribers.length === 0) {
     return;
   }
 
-  for (const chatId of config.telegram.chatIds) {
+  for (const chatId of subscribers) {
     try {
       await telegramBot.api.sendMessage(chatId, formatHeartbeatMessage(stats), {
         parse_mode: 'Markdown',

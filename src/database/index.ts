@@ -40,6 +40,18 @@ export function initDatabase(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_apartments_profile ON apartments(profile_id);
     CREATE INDEX IF NOT EXISTS idx_apartments_status ON apartments(status);
     CREATE INDEX IF NOT EXISTS idx_apartments_external ON apartments(external_id);
+    
+    CREATE TABLE IF NOT EXISTS subscribers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id TEXT NOT NULL UNIQUE,
+      username TEXT,
+      first_name TEXT,
+      subscribed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      is_active INTEGER NOT NULL DEFAULT 1
+    );
+    
+    CREATE INDEX IF NOT EXISTS idx_subscribers_chat_id ON subscribers(chat_id);
+    CREATE INDEX IF NOT EXISTS idx_subscribers_active ON subscribers(is_active);
   `);
 
   logger.info('Database initialized');
