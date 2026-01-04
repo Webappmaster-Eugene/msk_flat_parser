@@ -22,6 +22,12 @@ export async function initBrowser(): Promise<BrowserContext> {
       '--disable-blink-features=AutomationControlled',
       '--disable-dev-shm-usage',
       '--no-sandbox',
+      '--disable-gpu',
+      '--disable-software-rasterizer',
+      '--single-process',
+      '--no-zygote',
+      '--disable-extensions',
+      '--js-flags=--max-old-space-size=256',
     ],
   };
 
