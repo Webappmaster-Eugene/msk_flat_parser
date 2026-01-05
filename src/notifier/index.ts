@@ -1,10 +1,22 @@
-import { Bot } from 'grammy';
+import { Bot, GrammyError } from 'grammy';
 import { config } from '../config';
 import { logger } from '../logger';
 import { SimpleResult } from '../scraper/parser';
 import { formatStartupMessage, formatErrorMessage, formatAvailableAlert, formatHeartbeatMessage } from './templates';
 import { sendAlertWithReminders, startBotPolling } from './alert-manager';
-import { getAllSubscribers } from '../database/subscribers';
+import { getAllSubscribers, removeSubscriber } from '../database/subscribers';
+
+function handleSendError(error: unknown, chatId: string): void {
+  if (error instanceof GrammyError) {
+    // User blocked the bot or chat not found - remove from subscribers
+    if (error.error_code === 403 || error.error_code === 400) {
+      logger.warn({ chatId, errorCode: error.error_code }, 'User blocked bot or chat not found, removing from subscribers');
+      removeSubscriber(chatId);
+      return;
+    }
+  }
+  logger.error({ error, chatId }, 'Failed to send message');
+}
 
 let bot: Bot | null = null;
 
@@ -51,7 +63,7 @@ export async function sendStartupMessage(): Promise<void> {
       });
       logger.info({ chatId }, 'Startup message sent');
     } catch (error) {
-      logger.error({ error, chatId }, 'Failed to send startup message');
+      handleSendError(error, chatId);
     }
   }
 }
@@ -70,7 +82,7 @@ export async function sendErrorNotification(error: string): Promise<void> {
         parse_mode: 'Markdown',
       });
     } catch (e) {
-      logger.error({ error: e, chatId }, 'Failed to send error notification');
+      handleSendError(e, chatId);
     }
   }
 }
@@ -102,7 +114,7 @@ export async function sendHeartbeat(stats: { totalChecks: number; lastCheckTime:
       });
       logger.info({ chatId }, 'Heartbeat message sent');
     } catch (error) {
-      logger.error({ error, chatId }, 'Failed to send heartbeat message');
+      handleSendError(error, chatId);
     }
   }
 }

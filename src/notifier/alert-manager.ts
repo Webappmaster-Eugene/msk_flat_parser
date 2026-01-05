@@ -1,4 +1,4 @@
-import { Bot } from 'grammy';
+import { Bot, GrammyError } from 'grammy';
 import { config } from '../config';
 import { logger } from '../logger';
 import { SimpleResult, checkForAvailableApartments } from '../scraper';
@@ -6,6 +6,18 @@ import { formatAvailableAlert } from './templates';
 import { getEnabledProfiles } from '../config/search-profiles';
 import { getPage } from '../scraper';
 import { addSubscriber, removeSubscriber, isSubscriber, getAllSubscribers, getSubscriberCount } from '../database/subscribers';
+
+function handleSendError(error: unknown, chatId: string): void {
+  if (error instanceof GrammyError) {
+    // User blocked the bot or chat not found - remove from subscribers
+    if (error.error_code === 403 || error.error_code === 400) {
+      logger.warn({ chatId, errorCode: error.error_code }, 'User blocked bot or chat not found, removing from subscribers');
+      removeSubscriber(chatId);
+      return;
+    }
+  }
+  logger.error({ error, chatId }, 'Failed to send message');
+}
 
 interface PendingAlert {
   id: string;
@@ -311,7 +323,7 @@ export async function sendAlertWithReminders(
       });
       logger.info({ chatId, alertId }, 'Initial alert sent');
     } catch (error) {
-      logger.error({ error, chatId }, 'Failed to send initial alert');
+      handleSendError(error, chatId);
     }
   }
 
@@ -380,7 +392,7 @@ _Ответьте любым сообщением чтобы остановит�
       });
       logger.info({ chatId, alertId, reminderNum }, 'Reminder sent');
     } catch (error) {
-      logger.error({ error, chatId, reminderNum }, 'Failed to send reminder');
+      handleSendError(error, chatId);
     }
   }
 }

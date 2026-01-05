@@ -8,7 +8,18 @@ import path from 'path';
 let browser: Browser | null = null;
 let context: BrowserContext | null = null;
 
+function isBrowserAlive(): boolean {
+  return browser !== null && browser.isConnected();
+}
+
 export async function initBrowser(): Promise<BrowserContext> {
+  // Check if browser is still alive, if not - reset and reinitialize
+  if (browser && !browser.isConnected()) {
+    logger.warn('Browser disconnected, reinitializing...');
+    browser = null;
+    context = null;
+  }
+
   if (context) {
     return context;
   }
