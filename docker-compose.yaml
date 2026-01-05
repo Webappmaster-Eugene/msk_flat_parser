@@ -10,3 +10,9 @@ services:
       - CHECK_INTERVAL_MINUTES=${CHECK_INTERVAL_MINUTES:-2}
       - HEADLESS=true
       - LOG_LEVEL=${LOG_LEVEL:-info}
+    networks:
+      - coolify
+
+networks:
+  coolify:
+    external: true

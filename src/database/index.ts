@@ -22,7 +22,8 @@ export async function initDatabase(): Promise<Pool> {
     client.release();
     logger.info('PostgreSQL connected');
   } catch (error) {
-    logger.error({ error }, 'Failed to connect to PostgreSQL');
+    const safeUrl = config.database.url.replace(/:[^:@]+@/, ':***@');
+    logger.error({ error, url: safeUrl }, 'Failed to connect to PostgreSQL');
     throw error;
   }
 
