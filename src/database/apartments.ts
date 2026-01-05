@@ -1,4 +1,4 @@
-import { getDatabase } from './index';
+import { getPool } from './index';
 import { Apartment, ScrapedApartment, ApartmentStatus, ApartmentChange } from '../types';
 import { logger } from '../logger';
 
@@ -15,8 +15,8 @@ interface DbApartment {
   address: string | null;
   building: string | null;
   link: string | null;
-  created_at: string;
-  updated_at: string;
+  created_at: Date;
+  updated_at: Date;
 }
 
 function mapDbToApartment(row: DbApartment): Apartment {
@@ -33,47 +33,49 @@ function mapDbToApartment(row: DbApartment): Apartment {
     address: row.address,
     building: row.building,
     link: row.link,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
   };
 }
 
-export function getApartmentsByProfile(profileId: string): Apartment[] {
-  const db = getDatabase();
-  const rows = db.prepare(`
-    SELECT * FROM apartments WHERE profile_id = ?
-  `).all(profileId) as DbApartment[];
+export async function getApartmentsByProfile(profileId: string): Promise<Apartment[]> {
+  const pool = getPool();
+  const result = await pool.query<DbApartment>(
+    'SELECT * FROM apartments WHERE profile_id = $1',
+    [profileId]
+  );
   
-  return rows.map(mapDbToApartment);
+  return result.rows.map(mapDbToApartment);
 }
 
-export function getApartmentByExternalId(externalId: string, profileId: string): Apartment | null {
-  const db = getDatabase();
-  const row = db.prepare(`
-    SELECT * FROM apartments WHERE external_id = ? AND profile_id = ?
-  `).get(externalId, profileId) as DbApartment | undefined;
+export async function getApartmentByExternalId(externalId: string, profileId: string): Promise<Apartment | null> {
+  const pool = getPool();
+  const result = await pool.query<DbApartment>(
+    'SELECT * FROM apartments WHERE external_id = $1 AND profile_id = $2',
+    [externalId, profileId]
+  );
   
-  return row ? mapDbToApartment(row) : null;
+  return result.rows.length > 0 ? mapDbToApartment(result.rows[0]) : null;
 }
 
-export function upsertApartment(profileId: string, apt: ScrapedApartment): void {
-  const db = getDatabase();
+export async function upsertApartment(profileId: string, apt: ScrapedApartment): Promise<void> {
+  const pool = getPool();
   
-  db.prepare(`
+  await pool.query(`
     INSERT INTO apartments (external_id, profile_id, status, price, price_per_meter, area, floor, rooms, address, building, link, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
     ON CONFLICT(external_id, profile_id) DO UPDATE SET
-      status = excluded.status,
-      price = excluded.price,
-      price_per_meter = excluded.price_per_meter,
-      area = excluded.area,
-      floor = excluded.floor,
-      rooms = excluded.rooms,
-      address = excluded.address,
-      building = excluded.building,
-      link = excluded.link,
-      updated_at = datetime('now')
-  `).run(
+      status = EXCLUDED.status,
+      price = EXCLUDED.price,
+      price_per_meter = EXCLUDED.price_per_meter,
+      area = EXCLUDED.area,
+      floor = EXCLUDED.floor,
+      rooms = EXCLUDED.rooms,
+      address = EXCLUDED.address,
+      building = EXCLUDED.building,
+      link = EXCLUDED.link,
+      updated_at = NOW()
+  `, [
     apt.externalId,
     profileId,
     apt.status,
@@ -85,18 +87,18 @@ export function upsertApartment(profileId: string, apt: ScrapedApartment): void 
     apt.address,
     apt.building,
     apt.link
-  );
+  ]);
 }
 
-export function processScrapedApartments(
+export async function processScrapedApartments(
   profileId: string, 
   scrapedApartments: ScrapedApartment[],
   notifyOnNew: boolean,
   notifyOnAvailable: boolean,
   notifyOnPriceChange: boolean
-): ApartmentChange[] {
+): Promise<ApartmentChange[]> {
   const changes: ApartmentChange[] = [];
-  const existingApartments = getApartmentsByProfile(profileId);
+  const existingApartments = await getApartmentsByProfile(profileId);
   const existingMap = new Map(existingApartments.map(a => [a.externalId, a]));
 
   for (const scraped of scrapedApartments) {
@@ -148,24 +150,25 @@ export function processScrapedApartments(
       }
     }
 
-    upsertApartment(profileId, scraped);
+    await upsertApartment(profileId, scraped);
   }
 
   return changes;
 }
 
-export function getAvailableApartments(profileId?: string): Apartment[] {
-  const db = getDatabase();
+export async function getAvailableApartments(profileId?: string): Promise<Apartment[]> {
+  const pool = getPool();
   
   if (profileId) {
-    const rows = db.prepare(`
-      SELECT * FROM apartments WHERE profile_id = ? AND status = 'available'
-    `).all(profileId) as DbApartment[];
-    return rows.map(mapDbToApartment);
+    const result = await pool.query<DbApartment>(
+      "SELECT * FROM apartments WHERE profile_id = $1 AND status = 'available'",
+      [profileId]
+    );
+    return result.rows.map(mapDbToApartment);
   }
   
-  const rows = db.prepare(`
-    SELECT * FROM apartments WHERE status = 'available'
-  `).all() as DbApartment[];
-  return rows.map(mapDbToApartment);
+  const result = await pool.query<DbApartment>(
+    "SELECT * FROM apartments WHERE status = 'available'"
+  );
+  return result.rows.map(mapDbToApartment);
 }

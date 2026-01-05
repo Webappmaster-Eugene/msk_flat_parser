@@ -6,12 +6,12 @@ import { formatStartupMessage, formatErrorMessage, formatAvailableAlert, formatH
 import { sendAlertWithReminders, startBotPolling } from './alert-manager';
 import { getAllSubscribers, removeSubscriber } from '../database/subscribers';
 
-function handleSendError(error: unknown, chatId: string): void {
+async function handleSendError(error: unknown, chatId: string): Promise<void> {
   if (error instanceof GrammyError) {
     // User blocked the bot or chat not found - remove from subscribers
     if (error.error_code === 403 || error.error_code === 400) {
       logger.warn({ chatId, errorCode: error.error_code }, 'User blocked bot or chat not found, removing from subscribers');
-      removeSubscriber(chatId);
+      await removeSubscriber(chatId);
       return;
     }
   }
@@ -37,7 +37,7 @@ export function initNotifier(): Bot {
 export async function sendAvailableAlert(profileName: string, result: SimpleResult): Promise<void> {
   const telegramBot = initNotifier();
   
-  const subscribers = getAllSubscribers();
+  const subscribers = await getAllSubscribers();
   if (subscribers.length === 0) {
     logger.warn('No subscribers, skipping notification');
     return;
@@ -50,7 +50,7 @@ export async function sendAvailableAlert(profileName: string, result: SimpleResu
 export async function sendStartupMessage(): Promise<void> {
   const telegramBot = initNotifier();
   
-  const subscribers = getAllSubscribers();
+  const subscribers = await getAllSubscribers();
   if (subscribers.length === 0) {
     logger.info('No subscribers yet, skipping startup message');
     return;
@@ -63,7 +63,7 @@ export async function sendStartupMessage(): Promise<void> {
       });
       logger.info({ chatId }, 'Startup message sent');
     } catch (error) {
-      handleSendError(error, chatId);
+      await handleSendError(error, chatId);
     }
   }
 }
@@ -71,7 +71,7 @@ export async function sendStartupMessage(): Promise<void> {
 export async function sendErrorNotification(error: string): Promise<void> {
   const telegramBot = initNotifier();
   
-  const subscribers = getAllSubscribers();
+  const subscribers = await getAllSubscribers();
   if (subscribers.length === 0) {
     return;
   }
@@ -82,7 +82,7 @@ export async function sendErrorNotification(error: string): Promise<void> {
         parse_mode: 'Markdown',
       });
     } catch (e) {
-      handleSendError(e, chatId);
+      await handleSendError(e, chatId);
     }
   }
 }
@@ -102,7 +102,7 @@ export async function testConnection(): Promise<boolean> {
 export async function sendHeartbeat(stats: { totalChecks: number; lastCheckTime: Date | null; totalApartments: number; bookedCount: number }): Promise<void> {
   const telegramBot = initNotifier();
   
-  const subscribers = getAllSubscribers();
+  const subscribers = await getAllSubscribers();
   if (subscribers.length === 0) {
     return;
   }
@@ -114,7 +114,7 @@ export async function sendHeartbeat(stats: { totalChecks: number; lastCheckTime:
       });
       logger.info({ chatId }, 'Heartbeat message sent');
     } catch (error) {
-      handleSendError(error, chatId);
+      await handleSendError(error, chatId);
     }
   }
 }

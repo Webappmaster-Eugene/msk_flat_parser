@@ -24,6 +24,9 @@ function parseChatIds(value: string): string[] {
 }
 
 export const config = {
+  database: {
+    url: process.env.DATABASE_URL || 'postgresql://localhost:5432/moskvartaly',
+  },
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN || '',
     chatId: process.env.TELEGRAM_CHAT_ID || '',

@@ -7,12 +7,12 @@ import { getEnabledProfiles } from '../config/search-profiles';
 import { getPage } from '../scraper';
 import { addSubscriber, removeSubscriber, isSubscriber, getAllSubscribers, getSubscriberCount } from '../database/subscribers';
 
-function handleSendError(error: unknown, chatId: string): void {
+async function handleSendError(error: unknown, chatId: string): Promise<void> {
   if (error instanceof GrammyError) {
     // User blocked the bot or chat not found - remove from subscribers
     if (error.error_code === 403 || error.error_code === 400) {
       logger.warn({ chatId, errorCode: error.error_code }, 'User blocked bot or chat not found, removing from subscribers');
-      removeSubscriber(chatId);
+      await removeSubscriber(chatId);
       return;
     }
   }
@@ -74,7 +74,7 @@ export function initAlertManager(telegramBot: Bot): void {
   // Command /start - welcome message
   bot.command('start', async (ctx) => {
     const chatId = ctx.chat.id.toString();
-    const subscribed = isSubscriber(chatId);
+    const subscribed = await isSubscriber(chatId);
     const statusText = subscribed ? '✅ Вы подписаны на уведомления' : '❌ Вы не подписаны';
 
     await ctx.reply(
@@ -97,10 +97,10 @@ export function initAlertManager(telegramBot: Bot): void {
     const username = ctx.from?.username;
     const firstName = ctx.from?.first_name;
 
-    const added = addSubscriber(chatId, username, firstName);
+    const added = await addSubscriber(chatId, username, firstName);
     
     if (added) {
-      const count = getSubscriberCount();
+      const count = await getSubscriberCount();
       await ctx.reply(
         `✅ *Вы успешно подписались!*\n\n` +
         `Теперь вы будете получать уведомления о свободных квартирах.\n\n` +
@@ -117,7 +117,7 @@ export function initAlertManager(telegramBot: Bot): void {
   bot.command('unsubscribe', async (ctx) => {
     const chatId = ctx.chat.id.toString();
 
-    const removed = removeSubscriber(chatId);
+    const removed = await removeSubscriber(chatId);
     
     if (removed) {
       await ctx.reply(
@@ -135,8 +135,8 @@ export function initAlertManager(telegramBot: Bot): void {
   // Command /status - check subscription status
   bot.command('status', async (ctx) => {
     const chatId = ctx.chat.id.toString();
-    const subscribed = isSubscriber(chatId);
-    const totalSubscribers = getSubscriberCount();
+    const subscribed = await isSubscriber(chatId);
+    const totalSubscribers = await getSubscriberCount();
 
     const statusEmoji = subscribed ? '✅' : '❌';
     const statusText = subscribed ? 'Подписан' : 'Не подписан';
@@ -155,7 +155,7 @@ export function initAlertManager(telegramBot: Bot): void {
 
     try {
       // Check if user is subscribed
-      if (!isSubscriber(chatId)) {
+      if (!(await isSubscriber(chatId))) {
         await ctx.reply(
           '⚠️ Сначала подпишитесь на уведомления командой /subscribe',
           { parse_mode: 'Markdown' }
@@ -235,10 +235,10 @@ export function initAlertManager(telegramBot: Bot): void {
     }
   });
 
-  bot.on('message', (ctx) => {
+  bot.on('message', async (ctx) => {
     const chatId = ctx.chat.id.toString();
 
-    if (isSubscriber(chatId)) {
+    if (await isSubscriber(chatId)) {
       logger.info({ chatId, text: ctx.message.text }, 'Received message from subscriber');
 
       if (pendingAlert && !pendingAlert.acknowledged) {
@@ -315,7 +315,7 @@ export async function sendAlertWithReminders(
   const urgentMessage = `${message}\n\n⏰ *Ответьте на это сообщение чтобы подтвердить получение!*`;
 
   // Send initial alert to all subscribers
-  const subscribers = getAllSubscribers();
+  const subscribers = await getAllSubscribers();
   for (const chatId of subscribers) {
     try {
       await bot.api.sendMessage(chatId, urgentMessage, {
@@ -323,7 +323,7 @@ export async function sendAlertWithReminders(
       });
       logger.info({ chatId, alertId }, 'Initial alert sent');
     } catch (error) {
-      handleSendError(error, chatId);
+      await handleSendError(error, chatId);
     }
   }
 
@@ -384,7 +384,7 @@ async function sendReminder(alertId: string, profileName: string, result: Simple
 
 _Ответьте любым сообщением чтобы остановить напоминания_`;
 
-  const subscribers = getAllSubscribers();
+  const subscribers = await getAllSubscribers();
   for (const chatId of subscribers) {
     try {
       await bot.api.sendMessage(chatId, reminderMessage, {
@@ -392,7 +392,7 @@ _Ответьте любым сообщением чтобы остановит�
       });
       logger.info({ chatId, alertId, reminderNum }, 'Reminder sent');
     } catch (error) {
-      handleSendError(error, chatId);
+      await handleSendError(error, chatId);
     }
   }
 }

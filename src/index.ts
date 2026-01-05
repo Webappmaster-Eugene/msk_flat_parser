@@ -9,7 +9,7 @@ async function shutdown(): Promise<void> {
   logger.info('Shutting down...');
   stopScheduler();
   await closeBrowser();
-  closeDatabase();
+  await closeDatabase();
   logger.info('Shutdown complete');
   process.exit(0);
 }
@@ -24,7 +24,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  initDatabase();
+  await initDatabase();
 
   const telegramConnected = await testConnection();
   if (!telegramConnected) {
