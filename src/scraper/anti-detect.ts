@@ -43,7 +43,6 @@ export async function humanLikeScroll(page: Page): Promise<void> {
     await page.mouse.wheel(0, scrollAmount);
     await randomDelay(200, 500);
   } catch (error) {
-    // Ignore errors if page was closed during scroll
     if (String(error).includes('closed') || String(error).includes('Target')) {
       return;
     }

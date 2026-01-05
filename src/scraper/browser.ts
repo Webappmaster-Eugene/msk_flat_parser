@@ -13,7 +13,6 @@ function isBrowserAlive(): boolean {
 }
 
 export async function initBrowser(): Promise<BrowserContext> {
-  // Check if browser is still alive, if not - reset and reinitialize
   if (browser && !browser.isConnected()) {
     logger.warn('Browser disconnected, reinitializing...');
     browser = null;

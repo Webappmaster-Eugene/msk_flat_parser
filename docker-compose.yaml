@@ -4,38 +4,9 @@ services:
   app:
     build: .
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-moskvartaly}@postgres:5432/moskvartaly
+      - DATABASE_URL=${DATABASE_URL}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - CHECK_INTERVAL_MINUTES=${CHECK_INTERVAL_MINUTES:-2}
       - HEADLESS=true
       - LOG_LEVEL=${LOG_LEVEL:-info}
-    networks:
-      - app-network
-
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-moskvartaly}
-      - POSTGRES_DB=moskvartaly
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d moskvartaly"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - app-network
-
-volumes:
-  postgres_data:
-
-networks:
-  app-network:
-    driver: bridge
