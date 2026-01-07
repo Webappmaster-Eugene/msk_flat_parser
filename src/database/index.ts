@@ -43,9 +43,13 @@ export async function initDatabase(): Promise<ReturnType<typeof drizzle<typeof s
       await migrate(db, { migrationsFolder });
       logger.info('Database migrations applied successfully');
     } catch (error: any) {
-      // Check if error is about relation already exists (tables created before migrations)
-      if (error?.message?.includes('already exists')) {
-        logger.warn('Some tables already exist, marking migrations as applied');
+      // Check if error is about relation already exists (PostgreSQL code 42P07)
+      // Drizzle wraps errors - need to check string representation
+      const errorString = String(error) + JSON.stringify(error, Object.getOwnPropertyNames(error));
+      const isTableExists = errorString.includes('42P07') || errorString.includes('already exists');
+      
+      if (isTableExists) {
+        logger.info('Tables already exist, marking migrations as applied');
         // Create drizzle migrations table if not exists and mark migration as done
         try {
           await db.execute(sql`
