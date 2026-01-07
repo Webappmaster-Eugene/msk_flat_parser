@@ -14,6 +14,10 @@ RUN npx playwright install chromium --with-deps
 # Copy source code
 COPY src ./src
 
+# Copy Drizzle migrations
+COPY drizzle ./drizzle
+COPY drizzle.config.ts ./
+
 # Build TypeScript
 RUN npm run build
 

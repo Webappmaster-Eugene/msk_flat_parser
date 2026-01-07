@@ -9,6 +9,7 @@ export const config = {
   },
   telegram: {
     botToken: process.env.TELEGRAM_BOT_TOKEN || '',
+    adminChatId: process.env.ADMIN_CHAT_ID || '714820789',
   },
   scheduler: {
     checkIntervalMinutes: parseInt(process.env.CHECK_INTERVAL_MINUTES || '2', 10),

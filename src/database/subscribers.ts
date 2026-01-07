@@ -1,40 +1,35 @@
-import { getPool } from './index';
+import { eq, and, count, sql } from 'drizzle-orm';
+import { getDb } from './index';
+import { subscribers, Subscriber } from './schema';
 import { logger } from '../logger';
 
-export interface Subscriber {
-  id: number;
-  chatId: string;
-  username: string | null;
-  firstName: string | null;
-  subscribedAt: Date;
-  isActive: boolean;
-}
+export type { Subscriber } from './schema';
 
 export async function addSubscriber(chatId: string, username?: string, firstName?: string): Promise<boolean> {
-  const pool = getPool();
+  const db = getDb();
   
   try {
-    const existing = await pool.query(
-      'SELECT id, is_active FROM subscribers WHERE chat_id = $1',
-      [chatId]
-    );
+    const existing = await db.select({ id: subscribers.id, isActive: subscribers.isActive })
+      .from(subscribers)
+      .where(eq(subscribers.chatId, chatId))
+      .limit(1);
     
-    if (existing.rows.length > 0) {
-      if (!existing.rows[0].is_active) {
-        await pool.query(
-          'UPDATE subscribers SET is_active = TRUE, username = $1, first_name = $2 WHERE chat_id = $3',
-          [username || null, firstName || null, chatId]
-        );
+    if (existing.length > 0) {
+      if (!existing[0].isActive) {
+        await db.update(subscribers)
+          .set({ isActive: true, username: username || null, firstName: firstName || null })
+          .where(eq(subscribers.chatId, chatId));
         logger.info({ chatId, username }, 'Subscriber reactivated');
         return true;
       }
       return false;
     }
     
-    await pool.query(
-      'INSERT INTO subscribers (chat_id, username, first_name) VALUES ($1, $2, $3)',
-      [chatId, username || null, firstName || null]
-    );
+    await db.insert(subscribers).values({
+      chatId,
+      username: username || null,
+      firstName: firstName || null,
+    });
     
     logger.info({ chatId, username }, 'New subscriber added');
     return true;
@@ -45,15 +40,15 @@ export async function addSubscriber(chatId: string, username?: string, firstName
 }
 
 export async function removeSubscriber(chatId: string): Promise<boolean> {
-  const pool = getPool();
+  const db = getDb();
   
   try {
-    const result = await pool.query(
-      'UPDATE subscribers SET is_active = FALSE WHERE chat_id = $1 AND is_active = TRUE',
-      [chatId]
-    );
+    const result = await db.update(subscribers)
+      .set({ isActive: false })
+      .where(and(eq(subscribers.chatId, chatId), eq(subscribers.isActive, true)))
+      .returning({ id: subscribers.id });
     
-    if (result.rowCount && result.rowCount > 0) {
+    if (result.length > 0) {
       logger.info({ chatId }, 'Subscriber removed');
       return true;
     }
@@ -65,26 +60,54 @@ export async function removeSubscriber(chatId: string): Promise<boolean> {
 }
 
 export async function isSubscriber(chatId: string): Promise<boolean> {
-  const pool = getPool();
-  const result = await pool.query(
-    'SELECT 1 FROM subscribers WHERE chat_id = $1 AND is_active = TRUE',
-    [chatId]
-  );
-  return result.rows.length > 0;
+  const db = getDb();
+  const result = await db.select({ id: subscribers.id })
+    .from(subscribers)
+    .where(and(eq(subscribers.chatId, chatId), eq(subscribers.isActive, true)))
+    .limit(1);
+  return result.length > 0;
 }
 
 export async function getAllSubscribers(): Promise<string[]> {
-  const pool = getPool();
-  const result = await pool.query<{ chat_id: string }>(
-    'SELECT chat_id FROM subscribers WHERE is_active = TRUE'
-  );
-  return result.rows.map(row => row.chat_id);
+  const db = getDb();
+  const result = await db.select({ chatId: subscribers.chatId })
+    .from(subscribers)
+    .where(eq(subscribers.isActive, true));
+  return result.map(row => row.chatId);
 }
 
 export async function getSubscriberCount(): Promise<number> {
-  const pool = getPool();
-  const result = await pool.query(
-    'SELECT COUNT(*) as count FROM subscribers WHERE is_active = TRUE'
-  );
-  return parseInt(result.rows[0].count);
+  const db = getDb();
+  const result = await db.select({ count: count() })
+    .from(subscribers)
+    .where(eq(subscribers.isActive, true));
+  return result[0]?.count || 0;
+}
+
+export async function getAllSubscribersDetails(): Promise<Subscriber[]> {
+  const db = getDb();
+  const result = await db.select()
+    .from(subscribers)
+    .orderBy(sql`${subscribers.subscribedAt} DESC`);
+  return result;
+}
+
+export async function getSubscriberStats(): Promise<{
+  totalSubscribers: number;
+  activeSubscribers: number;
+  inactiveSubscribers: number;
+}> {
+  const db = getDb();
+  const result = await db.select({
+    total: count(),
+    active: count(sql`CASE WHEN ${subscribers.isActive} = true THEN 1 END`),
+    inactive: count(sql`CASE WHEN ${subscribers.isActive} = false THEN 1 END`),
+  }).from(subscribers);
+  
+  const row = result[0];
+  return {
+    totalSubscribers: row?.total || 0,
+    activeSubscribers: row?.active || 0,
+    inactiveSubscribers: row?.inactive || 0,
+  };
 }

@@ -6,6 +6,7 @@ import { getPage, randomDelay } from '../scraper';
 import { checkForAvailableApartments } from '../scraper/parser';
 import { sendAvailableAlert, sendErrorNotification, sendHeartbeat } from '../notifier';
 import { cleanupOldFiles } from '../utils/cleanup';
+import { addParsingHistory } from '../database/parsing-history';
 
 let scheduledTask: cron.ScheduledTask | null = null;
 let heartbeatTask: cron.ScheduledTask | null = null;
@@ -42,13 +43,26 @@ export async function runScrapeJob(): Promise<void> {
         const page = await getPage();
         
         try {
+          const startTime = Date.now();
           const result = await checkForAvailableApartments(page, profile);
+          const durationMs = Date.now() - startTime;
           
           if (result.error) {
             logger.error({ profileId: profile.id, error: result.error }, 'Scrape failed');
+            await addParsingHistory(profile.id, profile.name, 0, 0, 0, durationMs, result.error);
             await sendErrorNotification(`Ошибка парсинга профиля "${profile.name}": ${result.error}`);
             continue;
           }
+
+          // Save parsing history
+          await addParsingHistory(
+            profile.id,
+            profile.name,
+            result.totalButtons,
+            result.bookedButtons,
+            result.availableButtons.length,
+            durationMs
+          );
 
           logger.info({ 
             profileId: profile.id,

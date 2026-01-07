@@ -1,12 +1,18 @@
 import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import { sql } from 'drizzle-orm';
+import { existsSync } from 'fs';
 import { config } from '../config';
 import { logger } from '../logger';
+import * as schema from './schema';
 
 let pool: Pool | null = null;
+let db: ReturnType<typeof drizzle<typeof schema>> | null = null;
 
-export async function initDatabase(): Promise<Pool> {
-  if (pool) {
-    return pool;
+export async function initDatabase(): Promise<ReturnType<typeof drizzle<typeof schema>>> {
+  if (db) {
+    return db;
   }
 
   pool = new Pool({
@@ -27,45 +33,62 @@ export async function initDatabase(): Promise<Pool> {
     throw error;
   }
 
-  // Создаём таблицы
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS apartments (
-      id SERIAL PRIMARY KEY,
-      external_id TEXT NOT NULL,
-      profile_id TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'unknown',
-      price NUMERIC,
-      price_per_meter NUMERIC,
-      area NUMERIC,
-      floor INTEGER,
-      rooms INTEGER,
-      address TEXT,
-      building TEXT,
-      link TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      UNIQUE(external_id, profile_id)
-    );
+  db = drizzle(pool, { schema });
 
-    CREATE INDEX IF NOT EXISTS idx_apartments_profile ON apartments(profile_id);
-    CREATE INDEX IF NOT EXISTS idx_apartments_status ON apartments(status);
-    CREATE INDEX IF NOT EXISTS idx_apartments_external ON apartments(external_id);
-    
-    CREATE TABLE IF NOT EXISTS subscribers (
-      id SERIAL PRIMARY KEY,
-      chat_id TEXT NOT NULL UNIQUE,
-      username TEXT,
-      first_name TEXT,
-      subscribed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      is_active BOOLEAN NOT NULL DEFAULT TRUE
-    );
-    
-    CREATE INDEX IF NOT EXISTS idx_subscribers_chat_id ON subscribers(chat_id);
-    CREATE INDEX IF NOT EXISTS idx_subscribers_active ON subscribers(is_active);
-  `);
+  // Run migrations
+  const migrationsFolder = './drizzle';
+  
+  if (existsSync(migrationsFolder)) {
+    try {
+      await migrate(db, { migrationsFolder });
+      logger.info('Database migrations applied successfully');
+    } catch (error: any) {
+      // Check if error is about relation already exists (tables created before migrations)
+      if (error?.message?.includes('already exists')) {
+        logger.warn('Some tables already exist, marking migrations as applied');
+        // Create drizzle migrations table if not exists and mark migration as done
+        try {
+          await db.execute(sql`
+            CREATE TABLE IF NOT EXISTS "__drizzle_migrations" (
+              id SERIAL PRIMARY KEY,
+              hash text NOT NULL,
+              created_at bigint
+            )
+          `);
+          // Get list of migration files and mark them as applied
+          const fs = await import('fs');
+          const path = await import('path');
+          const files = fs.readdirSync(migrationsFolder).filter(f => f.endsWith('.sql'));
+          for (const file of files) {
+            const hash = file.replace('.sql', '');
+            await db.execute(sql`
+              INSERT INTO "__drizzle_migrations" (hash, created_at)
+              SELECT ${hash}, ${Date.now()}
+              WHERE NOT EXISTS (SELECT 1 FROM "__drizzle_migrations" WHERE hash = ${hash})
+            `);
+          }
+          logger.info('Migration journal updated for existing tables');
+        } catch (journalError) {
+          logger.error({ error: journalError }, 'Failed to update migration journal');
+        }
+      } else {
+        logger.error({ error }, 'Database migration failed');
+        throw error;
+      }
+    }
+  } else {
+    logger.warn({ migrationsFolder }, 'Migrations folder not found, skipping migrations');
+  }
 
-  logger.info('Database tables initialized');
-  return pool;
+  logger.info('Database initialized with Drizzle ORM');
+  return db;
+}
+
+export function getDb(): ReturnType<typeof drizzle<typeof schema>> {
+  if (!db) {
+    throw new Error('Database not initialized. Call initDatabase() first.');
+  }
+  return db;
 }
 
 export function getPool(): Pool {
@@ -79,6 +102,7 @@ export async function closeDatabase(): Promise<void> {
   if (pool) {
     await pool.end();
     pool = null;
+    db = null;
     logger.info('Database closed');
   }
 }

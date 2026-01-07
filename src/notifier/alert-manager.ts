@@ -5,7 +5,16 @@ import { SimpleResult, checkForAvailableApartments } from '../scraper';
 import { formatAvailableAlert } from './templates';
 import { getEnabledProfiles } from '../config/search-profiles';
 import { getPage } from '../scraper';
-import { addSubscriber, removeSubscriber, isSubscriber, getAllSubscribers, getSubscriberCount } from '../database/subscribers';
+import { addSubscriber, removeSubscriber, isSubscriber, getAllSubscribers, getSubscriberCount, getAllSubscribersDetails, getSubscriberStats } from '../database/subscribers';
+import { logBotUsage, getBotUsageStats } from '../database/bot-usage';
+import { getParsingStats, getParsingHistory } from '../database/parsing-history';
+import { getParsedApartmentsStats } from '../database/parsed-apartments';
+
+const ADMIN_CHAT_ID = config.telegram.adminChatId;
+
+function isAdmin(chatId: string): boolean {
+  return chatId === ADMIN_CHAT_ID;
+}
 
 async function handleSendError(error: unknown, chatId: string): Promise<void> {
   if (error instanceof GrammyError) {
@@ -54,12 +63,24 @@ export function initAlertManager(telegramBot: Bot): void {
     }, 'Bot error caught');
   });
 
+  // Set up native bot menu commands
+  bot.api.setMyCommands([
+    { command: 'start', description: '🏠 Начать работу с ботом' },
+    { command: 'subscribe', description: '✅ Подписаться на уведомления' },
+    { command: 'unsubscribe', description: '❌ Отписаться от уведомлений' },
+    { command: 'check', description: '🔍 Проверить квартиры сейчас' },
+    { command: 'status', description: '📊 Статус подписки' },
+    { command: 'chatid', description: '🆔 Показать ваш Chat ID' },
+    { command: 'help', description: '❓ Помощь по командам' },
+  ]).catch(err => logger.error({ err }, 'Failed to set bot commands'));
+
   // Command to get chat ID - works for ANY user
   bot.command('chatid', async (ctx) => {
     const chatId = ctx.chat.id.toString();
     const username = ctx.from?.username || 'unknown';
     const firstName = ctx.from?.first_name || '';
 
+    await logBotUsage(chatId, 'chatid');
     logger.info({ chatId, username }, 'User requested their chat ID');
 
     await ctx.reply(
@@ -71,22 +92,49 @@ export function initAlertManager(telegramBot: Bot): void {
     );
   });
 
+  // Command /help - help message
+  bot.command('help', async (ctx) => {
+    const chatId = ctx.chat.id.toString();
+    await logBotUsage(chatId, 'help');
+    
+    let helpText = `❓ *Помощь по командам*\n\n` +
+      `🏠 /start - Начать работу с ботом\n` +
+      `✅ /subscribe - Подписаться на уведомления\n` +
+      `❌ /unsubscribe - Отписаться от уведомлений\n` +
+      `🔍 /check - Проверить квартиры прямо сейчас\n` +
+      `📊 /status - Узнать статус подписки\n` +
+      `🆔 /chatid - Показать ваш Chat ID\n`;
+    
+    if (isAdmin(chatId)) {
+      helpText += `\n*Команды администратора:*\n` +
+        `👥 /users - Список всех пользователей\n` +
+        `📈 /analytics - Аналитика использования бота\n` +
+        `📜 /history - История парсинга\n`;
+    }
+    
+    await ctx.reply(helpText, { parse_mode: 'Markdown' });
+  });
+
   // Command /start - welcome message
   bot.command('start', async (ctx) => {
     const chatId = ctx.chat.id.toString();
+    await logBotUsage(chatId, 'start');
+    
     const subscribed = await isSubscriber(chatId);
     const statusText = subscribed ? '✅ Вы подписаны на уведомления' : '❌ Вы не подписаны';
+    const adminText = isAdmin(chatId) ? '\n\n👑 *Вы администратор бота*' : '';
 
     await ctx.reply(
       `🏠 *Москварталы Монитор*\n\n` +
       `Этот бот отслеживает появление свободных квартир.\n\n` +
-      `${statusText}\n\n` +
+      `${statusText}${adminText}\n\n` +
       `*Команды:*\n` +
       `/subscribe - подписаться на уведомления\n` +
       `/unsubscribe - отписаться от уведомлений\n` +
       `/check - проверить квартиры сейчас\n` +
       `/status - статус подписки\n` +
-      `/chatid - показать ваш Chat ID`,
+      `/chatid - показать ваш Chat ID\n` +
+      `/help - помощь по командам`,
       { parse_mode: 'Markdown' }
     );
   });
@@ -97,6 +145,7 @@ export function initAlertManager(telegramBot: Bot): void {
     const username = ctx.from?.username;
     const firstName = ctx.from?.first_name;
 
+    await logBotUsage(chatId, 'subscribe');
     const added = await addSubscriber(chatId, username, firstName);
     
     if (added) {
@@ -117,6 +166,7 @@ export function initAlertManager(telegramBot: Bot): void {
   bot.command('unsubscribe', async (ctx) => {
     const chatId = ctx.chat.id.toString();
 
+    await logBotUsage(chatId, 'unsubscribe');
     const removed = await removeSubscriber(chatId);
     
     if (removed) {
@@ -135,23 +185,158 @@ export function initAlertManager(telegramBot: Bot): void {
   // Command /status - check subscription status
   bot.command('status', async (ctx) => {
     const chatId = ctx.chat.id.toString();
+    await logBotUsage(chatId, 'status');
+    
     const subscribed = await isSubscriber(chatId);
     const totalSubscribers = await getSubscriberCount();
 
     const statusEmoji = subscribed ? '✅' : '❌';
     const statusText = subscribed ? 'Подписан' : 'Не подписан';
+    const adminText = isAdmin(chatId) ? '\n👑 Вы администратор' : '';
 
     await ctx.reply(
       `📊 *Статус подписки*\n\n` +
       `${statusEmoji} Ваш статус: *${statusText}*\n` +
-      `👥 Всего подписчиков: ${totalSubscribers}`,
+      `👥 Всего подписчиков: ${totalSubscribers}${adminText}`,
       { parse_mode: 'Markdown' }
     );
+  });
+
+  // ADMIN COMMANDS
+
+  // Command /users - list all users (admin only)
+  bot.command('users', async (ctx) => {
+    const chatId = ctx.chat.id.toString();
+    await logBotUsage(chatId, 'users');
+    
+    if (!isAdmin(chatId)) {
+      await ctx.reply('⛔ Эта команда доступна только администратору.');
+      return;
+    }
+
+    const subscribers = await getAllSubscribersDetails();
+    const stats = await getSubscriberStats();
+    
+    let message = `👥 *Пользователи бота*\n\n` +
+      `📊 Всего: ${stats.totalSubscribers}\n` +
+      `✅ Активных: ${stats.activeSubscribers}\n` +
+      `❌ Неактивных: ${stats.inactiveSubscribers}\n\n` +
+      `*Список пользователей:*\n\n`;
+    
+    for (const sub of subscribers) {
+      const statusIcon = sub.isActive ? '✅' : '❌';
+      const username = sub.username ? `@${sub.username}` : 'нет';
+      const date = sub.subscribedAt.toLocaleDateString('ru-RU');
+      message += `${statusIcon} \`${sub.chatId}\`\n`;
+      message += `   👤 ${sub.firstName || 'Без имени'} (${username})\n`;
+      message += `   📅 ${date}\n\n`;
+    }
+    
+    await ctx.reply(message, { parse_mode: 'Markdown' });
+  });
+
+  // Command /analytics - bot usage analytics (admin only)
+  bot.command('analytics', async (ctx) => {
+    const chatId = ctx.chat.id.toString();
+    await logBotUsage(chatId, 'analytics');
+    
+    if (!isAdmin(chatId)) {
+      await ctx.reply('⛔ Эта команда доступна только администратору.');
+      return;
+    }
+
+    const botStats = await getBotUsageStats();
+    const parsingStats = await getParsingStats();
+    const apartmentsStats = await getParsedApartmentsStats();
+    const subscriberStats = await getSubscriberStats();
+    
+    let message = `📈 *Аналитика бота*\n\n`;
+    
+    // Bot usage
+    message += `*📱 Использование бота:*\n`;
+    message += `├ Всего команд: ${botStats.totalCommands}\n`;
+    message += `├ Уникальных пользователей: ${botStats.uniqueUsers}\n`;
+    message += `├ Команд сегодня: ${botStats.commandsToday}\n`;
+    message += `├ За 24 часа: ${botStats.commandsLast24h}\n`;
+    message += `└ За 7 дней: ${botStats.commandsLast7d}\n\n`;
+    
+    // Top commands
+    if (botStats.topCommands.length > 0) {
+      message += `*🔝 Популярные команды:*\n`;
+      botStats.topCommands.slice(0, 5).forEach((cmd, i) => {
+        message += `${i + 1}. /${cmd.command} - ${cmd.count}\n`;
+      });
+      message += `\n`;
+    }
+    
+    // Parsing stats
+    message += `*🔍 Статистика парсинга:*\n`;
+    message += `├ Всего проверок: ${parsingStats.totalParses}\n`;
+    message += `├ Успешных: ${parsingStats.successfulParses}\n`;
+    message += `├ Ошибок: ${parsingStats.failedParses}\n`;
+    message += `├ Среднее время: ${parsingStats.avgDurationMs}мс\n`;
+    message += `├ Проверок сегодня: ${parsingStats.parsesToday}\n`;
+    message += `└ За 24 часа: ${parsingStats.parsesLast24h}\n\n`;
+    
+    // Apartments stats
+    message += `*🏠 Квартиры:*\n`;
+    message += `├ Всего: ${apartmentsStats.totalApartments}\n`;
+    message += `├ Доступно: ${apartmentsStats.availableCount}\n`;
+    message += `├ Забронировано: ${apartmentsStats.bookedCount}\n`;
+    message += `├ Продано: ${apartmentsStats.soldCount}\n`;
+    message += `└ Изменили статус: ${apartmentsStats.apartmentsWithStatusChange}\n\n`;
+    
+    // Subscribers
+    message += `*👥 Подписчики:*\n`;
+    message += `├ Всего: ${subscriberStats.totalSubscribers}\n`;
+    message += `├ Активных: ${subscriberStats.activeSubscribers}\n`;
+    message += `└ Неактивных: ${subscriberStats.inactiveSubscribers}\n`;
+    
+    await ctx.reply(message, { parse_mode: 'Markdown' });
+  });
+
+  // Command /history - parsing history (admin only)
+  bot.command('history', async (ctx) => {
+    const chatId = ctx.chat.id.toString();
+    await logBotUsage(chatId, 'history');
+    
+    if (!isAdmin(chatId)) {
+      await ctx.reply('⛔ Эта команда доступна только администратору.');
+      return;
+    }
+
+    const history = await getParsingHistory(15);
+    
+    if (history.length === 0) {
+      await ctx.reply('📜 История парсинга пуста.');
+      return;
+    }
+    
+    let message = `📜 *История парсинга* (последние 15)\n\n`;
+    
+    for (const entry of history) {
+      const date = entry.parsedAt.toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
+      const statusIcon = entry.error ? '❌' : '✅';
+      const duration = entry.durationMs ? `${(entry.durationMs / 1000).toFixed(1)}с` : '-';
+      
+      message += `${statusIcon} *${entry.profileName}*\n`;
+      message += `   📅 ${date}\n`;
+      message += `   ⏱ ${duration}\n`;
+      if (entry.error) {
+        message += `   ⚠️ ${entry.error.substring(0, 50)}...\n`;
+      } else {
+        message += `   📊 ${entry.totalApartments} всего, ${entry.availableApartments} своб.\n`;
+      }
+      message += `\n`;
+    }
+    
+    await ctx.reply(message, { parse_mode: 'Markdown' });
   });
 
   // Command /check - immediate check with report (available to all subscribers)
   bot.command('check', async (ctx) => {
     const chatId = ctx.chat.id.toString();
+    await logBotUsage(chatId, 'check');
 
     try {
       // Check if user is subscribed
